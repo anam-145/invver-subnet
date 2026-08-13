@@ -1,0 +1,16 @@
+[profile.default]
+src = "src"
+out = "forge-out"
+libs = ["lib"]
+test = "test"
+solc = "0.8.20"
+optimizer = false
+
+remappings = [
+    "forge-std/=lib/forge-std/src/",
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+]
+
+# ERC777 은 OpenZeppelin v5 에서 제거되었다. 반드시 v4.9.x 를 설치할 것:
+#   forge install foundry-rs/forge-std
+#   forge install OpenZeppelin/openzeppelin-contracts@v4.9.6

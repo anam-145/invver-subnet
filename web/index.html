@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Invariant Subnet — Anam145</title>
+<meta name="description" content="취약점 채점을 판단이 아니라 실행으로 바꾸는 Bittensor 보안 서브넷 PoC." />
+<link rel="stylesheet" as="style" crossorigin
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+<link rel="stylesheet" href="./assets/styles.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="shell topbar-inner">
+    <span class="wordmark">Anam145</span>
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="ko" class="on">KO</button>
+      <button type="button" data-lang="en">EN</button>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- ── hero ────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="shell">
+    <p class="eyebrow" data-i="hero.eyebrow"></p>
+    <h1 data-i="hero.title"></h1>
+    <p class="lede" data-i="hero.lede"></p>
+    <div class="chips">
+      <span class="chip"><b data-i="chip.target.k"></b><span data-i="chip.target.v"></span></span>
+      <span class="chip"><b data-i="chip.gen.k"></b><span data-i="chip.gen.v"></span></span>
+      <span class="chip"><b data-i="chip.verify.k"></b><span data-i="chip.verify.v"></span></span>
+    </div>
+  </div>
+</section>
+
+<!-- ── problem ─────────────────────────────────────────── -->
+<section class="band">
+  <div class="shell">
+    <div class="split">
+      <div>
+        <h2 data-i="prob.title"></h2>
+        <p class="body" data-i="prob.p1"></p>
+        <p class="body" data-i="prob.p2"></p>
+      </div>
+      <div class="answer">
+        <p class="answer-label" data-i="prob.ansLabel"></p>
+        <p class="answer-text" data-i="prob.ans"></p>
+        <ul class="roles">
+          <li><span class="role" data-i="role.miner"></span><span data-i="role.minerD"></span></li>
+          <li><span class="role" data-i="role.val"></span><span data-i="role.valD"></span></li>
+          <li><span class="role" data-i="role.inv"></span><span data-i="role.invD"></span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── step 1 ──────────────────────────────────────────── -->
+<section class="band">
+  <div class="shell">
+    <div class="sec-head">
+      <div>
+        <p class="step">STEP 1</p>
+        <h2 data-i="s1.title"></h2>
+      </div>
+      <span class="state live" data-i="state.live"></span>
+    </div>
+
+    <p class="body narrow" data-i="s1.p1"></p>
+    <p class="body narrow" data-i="s1.p2"></p>
+
+    <div class="card">
+      <label class="field-label" for="src" data-i="s1.input"></label>
+      <textarea id="src" spellcheck="false"></textarea>
+      <div class="actions">
+        <button type="button" id="run1" class="btn" data-i="s1.run"></button>
+        <button type="button" id="fix" class="btn ghost" data-i="s1.fix"></button>
+        <button type="button" id="reset" class="btn ghost" data-i="s1.reset"></button>
+      </div>
+    </div>
+
+    <div id="out1">
+      <h3 data-i="s1.sig"></h3>
+      <div class="signals" id="sigs"></div>
+
+      <h3 data-i="s1.cei"></h3>
+      <div id="ceibox"></div>
+
+      <h3 data-i="s1.rank"></h3>
+      <div class="rank" id="rank"></div>
+      <p class="caption" data-i="s1.rankNote"></p>
+    </div>
+  </div>
+</section>
+
+<!-- ── step 2 ──────────────────────────────────────────── -->
+<section class="band">
+  <div class="shell">
+    <div class="sec-head">
+      <div>
+        <p class="step">STEP 2</p>
+        <h2 data-i="s2.title"></h2>
+      </div>
+      <span class="state pending" data-i="state.pending"></span>
+    </div>
+
+    <p class="body narrow" data-i="s2.p1"></p>
+    <div class="callout warn narrow"><p data-i="s2.warn"></p></div>
+
+    <h3 data-i="s2.req"></h3>
+    <pre><code>POST https://api.anthropic.com/v1/messages
+  model         : claude-opus-5
+  output_config : { effort: "high",
+                    format: { type: "json_schema", schema: INVARIANT_SCHEMA } }
+  system        : formal-verification engineer / target post-conditions
+  user          : full source + STEP 1 signals + CEI violations + top-5 properties</code></pre>
+
+    <h3 data-i="s2.schema"></h3>
+    <pre><code>{
+  "id":                "INV-1",
+  "category":          "reentrancy | money_flow | access_control | ...",
+  "statement":         "a property that must always hold",
+  "solidity_assert":   "assert(bank._mints(user) &lt;= bank.maxMints());",
+  "rationale":         "which part of the code this rests on",
+  "breaks_if":         "what attack succeeded if this breaks",
+  "protocol_specific": true | false,
+  "confidence":        "high | medium | low"
+}</code></pre>
+
+    <div class="callout narrow"><p data-i="s2.note"></p></div>
+  </div>
+</section>
+
+<!-- ── step 3 ──────────────────────────────────────────── -->
+<section class="band">
+  <div class="shell">
+    <div class="sec-head">
+      <div>
+        <p class="step">STEP 3</p>
+        <h2 data-i="s3.title"></h2>
+      </div>
+      <span class="state pending" data-i="state.pendingForge"></span>
+    </div>
+
+    <p class="body narrow" data-i="s3.p1"></p>
+
+    <div class="card">
+      <div class="actions" style="margin-bottom:20px">
+        <button type="button" id="run3" class="btn" data-i="s3.run"></button>
+        <button type="button" id="reset3" class="btn ghost" data-i="s3.rewind"></button>
+      </div>
+      <div class="trace" id="trace"></div>
+      <div class="verdict" id="verdict"></div>
+    </div>
+
+    <div class="callout warn narrow"><p data-i="s3.warn"></p></div>
+
+    <h3 data-i="s3.code"></h3>
+    <pre><code>contract InvariantChecker {
+    function checkPerAccountUpperBound(address account) external view {
+        assert(bank._mints(account) &lt;= bank.maxMints());
+    }
+    function checkBalanceUpperBound(address account) external view {
+        assert(token.balanceOf(account) &lt;= bank.maxMints());
+    }
+}</code></pre>
+    <p class="body narrow" data-i="s3.codeNote"></p>
+  </div>
+</section>
+
+<!-- ── evidence ────────────────────────────────────────── -->
+<section class="band">
+  <div class="shell">
+    <div class="sec-head"><div><h2 data-i="ev.title"></h2></div></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr>
+          <th data-i="ev.h1"></th><th data-i="ev.h2"></th><th data-i="ev.h3"></th>
+        </tr></thead>
+        <tbody id="evbody"></tbody>
+      </table>
+    </div>
+
+    <h3 data-i="lim.title"></h3>
+    <ol class="limits" id="limits"></ol>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="shell">
+    <p class="foot-note" data-i="foot.src"></p>
+    <p class="foot-note" data-i="foot.run"></p>
+  </div>
+</footer>
+
+<script src="./assets/app.js"></script>
+</body>
+</html>

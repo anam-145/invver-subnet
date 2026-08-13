@@ -1,0 +1,29 @@
+# ── Node (generator/) ────────────────────────────────────────
+node_modules/
+generator/out/
+npm-debug.log*
+
+# ── Foundry (generator/) ─────────────────────────────────────
+generator/lib/
+generator/forge-out/
+generator/cache/
+generator/broadcast/
+
+# ── Python (subnet/) ─────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# ── web/ ─────────────────────────────────────────────────────
+web/assets/fonts/
+
+# ── editors / OS ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

@@ -1,0 +1,16 @@
+{
+  "name": "invariant-poc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PropertyGPT식 RAG invariant 생성 + Foundry 검증 PoC (Anam145 Bittensor 서브넷)",
+  "scripts": {
+    "step1": "node src/generate_invariants.mjs src/SimpleBank.sol --step1",
+    "prompt": "node src/generate_invariants.mjs src/SimpleBank.sol --print-prompt",
+    "generate": "node src/generate_invariants.mjs src/SimpleBank.sol",
+    "verify": "forge test --match-contract InvariantCheckTest -vv"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0"
+  }
+}
