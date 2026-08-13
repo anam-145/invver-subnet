@@ -1,6 +1,7 @@
 /* ============================================================
    Invariant Subnet — Anam145
-   STEP 1 은 이 페이지에서 실제로 실행된다 (src/retrieve.mjs 의 브라우저 포트).
+   Stage 1 genuinely runs in this page — a browser port of generator/src/retrieve.mjs.
+   The Korean and English strings in I18N below are page copy, not comments.
    ============================================================ */
 "use strict";
 
@@ -219,7 +220,7 @@ const LIMITS = {
   ]
 };
 
-/* ─── 대상 컨트랙트 ───────────────────────────────────────── */
+/* ─── target contract ─────────────────────────────────────── */
 const ORIGINAL = `contract SimpleBank is Test {
     ERC777 private token;
     uint maxMintsPerAddress = 1000;
@@ -264,7 +265,7 @@ const FIXED = ORIGINAL.replace(
   "        _mints[account] += amount;\n        token.transfer(account, amount);"
 );
 
-/* ─── 참조 property DB ────────────────────────────────────── */
+/* ─── reference property corpus ───────────────────────────── */
 const SIGNAL_LABELS = {
   ko: {
     erc777_hook: "ERC777 / 1820 수신자 훅",
@@ -315,7 +316,7 @@ const PROPERTIES = [
 
 const TOP_K = 5;
 
-/* ─── 정적 분석 ───────────────────────────────────────────── */
+/* ─── static analysis ─────────────────────────────────────── */
 function collectStateVars(src) {
   const names = new Set();
   const re = /^\s*(?:mapping\s*\([^;]*?\)|u?int\d*|address|bool|bytes\d*)\s+(?:public\s+|private\s+|internal\s+|constant\s+|immutable\s+)*(\w+)\s*(?:=|;)/gm;
@@ -396,7 +397,7 @@ function rankProperties(signals) {
   }).sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 }
 
-/* ─── 공격 트레이스 ───────────────────────────────────────── */
+/* ─── exploit trace (hand-derived, deterministic) ─────────── */
 const CAP = 1000;
 const TRACE = {
   ko: [
@@ -421,7 +422,7 @@ const TRACE = {
   ]
 };
 
-/* ─── 렌더링 ──────────────────────────────────────────────── */
+/* ─── rendering ───────────────────────────────────────────── */
 const $ = (id) => document.getElementById(id);
 let lang = "ko";
 const t = (k) => I18N[lang][k] ?? k;

@@ -1,43 +1,49 @@
 # web
 
-Anam145 Bittensor 보안 서브넷 제안 — 공개 데모 사이트.
-Bitstarter 지원서의 "Files & media" 항목에 링크할 정적 페이지다.
+A static page that walks through the pipeline: retrieval, generation, and the exploit trace.
 
-의존성 없는 **순수 정적 사이트**다. 빌드 스텝도, 백엔드도, 환경변수도 없다.
-
----
-
-## 구조
-
-```
-web/
-├── index.html          구조 + i18n 키
-├── assets/
-│   ├── styles.css      디자인 토큰 + 레이아웃
-│   └── app.js          i18n · STEP 1 정적 분석기 · STEP 3 트레이스
-└── README.md
-```
+No build step, no backend, no environment variables. Three files.
 
 ---
 
-## 로컬 실행
+## Run locally
 
 ```bash
 python -m http.server 8080
-# → http://localhost:8080
+# → http://localhost:8080/?lang=en
 ```
 
-또는
+or `npx serve .`. Opening `index.html` via `file://` also works — there are no fetches.
 
-```bash
-npx serve .
+## Language
+
+`KO / EN` toggle at top right, also settable by URL:
+
+```
+http://localhost:8080/?lang=en
 ```
 
-`file://` 로 직접 열어도 동작한다 (외부 fetch가 없다).
+## Layout
+
+```
+index.html          structure + i18n keys
+assets/styles.css   design tokens and layout
+assets/app.js       i18n · stage 1 static analyzer · exploit trace
+```
+
+Stage 1 genuinely runs in the browser — paste any Solidity into the textarea and the signal extraction and property ranking recompute. Press **Fix the CEI order** and the violation disappears while reentrancy drops from 7 to 4.
+
+Stages 2 and 3 are labelled as not yet run, because they have not been. Do not fill them with fabricated output; see the note at the bottom of this file.
 
 ---
 
-## 배포
+## Deploying
+
+Every path is relative, so a subdirectory works as well as a subdomain. Only `index.html` and `assets/` need to be uploaded — not this README.
+
+### Static host (Cloudflare Pages, Vercel, Netlify, GitHub Pages)
+
+No build command. Output directory `web`.
 
 ### Nginx
 
@@ -53,13 +59,7 @@ server {
 }
 ```
 
-```bash
-sudo mkdir -p /var/www/invariant-subnet
-sudo rsync -av --delete ./ /var/www/invariant-subnet/ --exclude .git --exclude README.md
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-### Caddy (HTTPS 자동)
+### Caddy (automatic HTTPS)
 
 ```
 demo.example.com {
@@ -68,43 +68,35 @@ demo.example.com {
 }
 ```
 
-### Vercel / Netlify / Cloudflare Pages / GitHub Pages
+### Upload
 
-빌드 명령 없음, 출력 디렉터리 `.` 로 두고 레포를 그대로 연결하면 된다.
+```bash
+scp -r index.html assets user@host:/var/www/invariant-subnet/
+```
+
+Create the directory and fix ownership first — `scp` will not create nested directories, and web roots are usually owned by root.
 
 ---
 
-## 언어
+## Design tokens
 
-우측 상단 `KO / EN` 토글. URL 파라미터로도 고정된다:
-
-```
-https://demo.example.com/?lang=en
-```
-
-**Bitstarter 지원서에는 `?lang=en` 을 붙여서 제출하세요.** 심사자가 영어로 먼저 봅니다.
-
----
-
-## 디자인 토큰
-
-| 역할 | 값 |
+| Role | Value |
 |---|---|
 | Primary | `#3182F6` |
 | Background | `#F9FAFB` |
 | Text | `#4E5968` |
 | Title | `#191F28` |
 | Border | `#E5E8EB` |
-| Sub text | `#8B95A1` |
+| Secondary text | `#8B95A1` |
 | Fill | `#F2F4F6` |
 | Danger | `#F04452` |
 | Success | `#00A661` |
 
-폰트는 **Pretendard Variable** (dynamic subset, jsDelivr CDN).
+Typeface is **Pretendard Variable** (dynamic subset, jsDelivr CDN) — the only external reference on the page.
 
-### 폰트를 자체 호스팅하려면
+### Self-hosting the font
 
-외부 CDN 의존을 없애고 싶으면:
+To remove that dependency:
 
 ```bash
 mkdir -p assets/fonts
@@ -112,7 +104,7 @@ curl -L -o assets/fonts/PretendardVariable.woff2 \
   https://github.com/orioncactus/pretendard/raw/main/packages/pretendard/dist/web/variable/woff2/PretendardVariable.woff2
 ```
 
-`index.html` 의 CDN `<link>` 를 지우고 `assets/styles.css` 맨 위에 추가:
+Delete the CDN `<link>` from `index.html` and add to the top of `assets/styles.css`:
 
 ```css
 @font-face {
@@ -124,32 +116,25 @@ curl -L -o assets/fonts/PretendardVariable.woff2 \
 }
 ```
 
----
-
-## 내용을 고칠 때
-
-- **문구**: `assets/app.js` 의 `I18N` 객체. `ko` / `en` 양쪽을 같이 고칠 것.
-- **근거 표**: 같은 파일 `EVIDENCE`.
-- **한계 목록**: 같은 파일 `LIMITS`.
-- **참조 property DB**: `PROPERTIES` — `../generator/src/reference_db.json` 과 동기화 유지.
-- **정적 분석기**: `extractSignals` / `detectCEI` — `../generator/src/retrieve.mjs` 의 포트다. 한쪽만 고치지 말 것.
-
-### ⚠️ STEP 2 · 3 을 실행한 뒤에 반드시 갱신할 것
-
-지금 페이지는 STEP 2·3 을 **"미실행"** 으로 정직하게 표시하고 있다.
-`generator` 에서 실제로 돌린 뒤에는:
-
-1. `I18N.*.s2.warn` / `s3.warn` 의 경고 문구를 실측 결과로 교체
-2. `.state.pending` → `.state.live` 로 클래스 변경 (`index.html`)
-3. `EVIDENCE` 의 마지막 두 행 상태를 `no` → `ok` 로 변경
-4. STEP 2 섹션에 실제 생성된 invariant 출력 추가
-
-**실행하지 않은 결과를 채워 넣지 말 것.** 기술 인터뷰에서 바로 드러난다.
+`assets/fonts/` is gitignored at the repository root — remove that line if you vendor the font.
 
 ---
 
-## 관련
+## Editing
 
-- 소스 저장소: `../generator`
-- 대상 컨트랙트: [DeFiVulnLabs / ERC777-reentrancy.sol](https://github.com/SunWeb3Sec/DeFiVulnLabs/blob/main/src/test/ERC777-reentrancy.sol) (MIT)
-- Trace2Inv (MIT) · PropertyGPT, NDSS 2025
+- **Copy** — the `I18N` object in `assets/app.js`. Change `ko` and `en` together.
+- **Evidence table** — `EVIDENCE` in the same file.
+- **Limitations** — `LIMITS` in the same file.
+- **Reference property corpus** — `PROPERTIES`. Keep in sync with [`../generator/src/reference_db.json`](../generator/src/reference_db.json).
+- **Static analyzer** — `extractSignals` / `detectCEI`. This is a port of [`../generator/src/retrieve.mjs`](../generator/src/retrieve.mjs). **Do not change one without the other.**
+
+### After stages 2 and 3 have actually been run
+
+The page currently marks them **not yet run**, honestly. Once they have been executed from `generator/`:
+
+1. Replace the warning text in `I18N.*.s2.warn` and `s3.warn` with the measured result.
+2. Change the `.state pending` class to `.state live` in `index.html`.
+3. Flip the last two rows of `EVIDENCE` from `no` to `ok`.
+4. Add the generated invariants to the stage 2 section.
+
+**Do not fill in results that were not produced.** A technical conversation surfaces it immediately.

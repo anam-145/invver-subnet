@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "PropertyGPT식 RAG invariant 생성 + Foundry 검증 PoC (Anam145 Bittensor 서브넷)",
+  "description": "PropertyGPT-style RAG invariant generation and Foundry verification",
   "scripts": {
     "step1": "node src/generate_invariants.mjs src/SimpleBank.sol --step1",
     "prompt": "node src/generate_invariants.mjs src/SimpleBank.sol --print-prompt",

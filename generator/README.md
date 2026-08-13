@@ -1,90 +1,41 @@
 # generator
 
-신규 컨트랙트(트랜잭션 히스토리 0건)에서 **코드만으로 검증 가능한 invariant를 생성**하고,
-밸리데이터가 **판단하지 않고 assert만 실행해도** 재진입 공격이 탐지되는지 확인하는 PoC.
+Generates machine-checkable invariants for a contract that has **no transaction history**, and provides the Foundry harness that turns one into a pass/fail check.
 
-Anam145 Bittensor 서브넷 설계의 부품 검증용.
-
----
-
-## 무엇을 증명하려는가
-
-설계의 핵심 모순은 이거였다: 제출물이 자유 서술이면 밸리데이터가 "이게 취약점인가"를 판단해야 하고,
-그럼 밸리데이터가 마이너보다 유능해야 한다. 서브넷은 그렇게 굴러가지 않는다.
-
-invariant를 **실행 가능한 assert 형태로 강제**하면 판단이 실행으로 바뀐다.
-
-```
-마이너      = 공격 PoC 탐색          →  test/InvariantCheck.t.sol 의 Attacker
-밸리데이터  = assert 실행만          →  같은 파일의 InvariantChecker (분기 없음)
-invariant   = 회사/RAG가 공급        →  src/generate_invariants.mjs
-```
+This is the Tier 1 supply side of the subnet: the standard invariant classes a validator can be handed without a human writing them.
 
 ---
 
-## 대상 컨트랙트
+## Why this exists
 
-**DeFiVulnLabs / `SimpleBank`** — ERC777 reentrancy.
+`Trace2Inv` and similar tools mine invariants out of a contract's past transactions. They work well — we reproduced 23 of 27 real exploits blocked at 3.99% FP — but they structurally cannot run on a contract that was deployed yesterday. There is nothing to mine.
 
-- 원본: https://github.com/SunWeb3Sec/DeFiVulnLabs/blob/main/src/test/ERC777-reentrancy.sol
-- `src/SimpleBank.sol` 은 위 파일에서 `SimpleBank` 컨트랙트를 발췌한 것이다.
-  로직은 **수정하지 않았다.** 원본의 `// Do not follow check-effect-interaction` 주석만 제거했다 —
-  LLM이 힌트 없이 코드 구조만으로 invariant를 뽑는지 보기 위함.
+This pipeline reads source only.
 
-왜 DeFiHackLabs가 아니라 DeFiVulnLabs인가: DeFiHackLabs는 실제 사건이라 메인넷 fork(아카이브 RPC + API 키)가
-필요하다. DeFiVulnLabs는 교육용 단일 파일 예제라 fork 없이 코드만으로 돌아가고,
-"코드만으로 invariant 생성"이라는 명제에 정확히 맞는다.
-
-### 취약점
-
-```solidity
-function claim(address account, uint256 amount) public returns (bool) {
-    require(_mints[account] + amount <= maxMintsPerAddress, "Exceeds max mints per address");
-
-    token.transfer(account, amount);   // ← interaction 이 먼저
-    _mints[account] += amount;         // ← effect 가 나중  (CEI 위반)
-
-    return true;
-}
-```
-
-상한 1,000. 공격자가 900을 요청 → `transfer` 중 ERC777 훅이 발동 →
-훅 안에서 `claim(this, 1000)` 재진입 → `require`가 아직 0인 `_mints`를 다시 봄 → 통과.
-최종 잔액 1,900.
-
----
-
-## 파이프라인
-
-| 단계 | 하는 일 | API 키 | 실행 상태 |
+| Stage | What it does | Needs an API key | State |
 |---|---|---|---|
-| STEP 1 | RAG 검색 — 정적 signal 추출 + 참조 property 랭킹 | 불필요 | ✅ 검증됨 |
-| STEP 2 | LLM invariant 생성 (`claude-opus-5`, JSON schema 강제) | 필요 | ⬜ 미실행 |
-| STEP 3 | Foundry로 공격 실행 + invariant 평가 | 불필요 (forge 필요) | ⬜ 미실행 |
-
-STEP 2·3이 미실행인 이유는 아래 **"아직 검증되지 않은 것"** 참고.
+| **1 — Retrieval** | Extract static signals, rank a reference property corpus against them | No | ✅ Working, measured |
+| **2 — Generation** | Give the retrieved properties to a model as in-context examples; get back invariants, each carrying one executable `assert` | Yes (or paste the prompt into a chat UI) | Implemented, not yet run |
+| **3 — Verification** | Plant the assert, run an exploit against it in a forked EVM | No (needs Foundry) | Harness written, not yet executed |
 
 ---
 
-## 실행
-
-### 준비
+## Setup
 
 ```bash
-cd generator
 npm install
 ```
 
-### STEP 1 — API 키 없이 바로
+## Stage 1 — retrieval, no key required
 
 ```bash
 npm run step1
 ```
 
-실측 출력:
+Measured output:
 
 ```
-탐지된 signal:
+detected signals:
   ✓ erc777_hook
   ✓ external_call_before_state_write
   ✓ no_reentrancy_guard
@@ -93,10 +44,10 @@ npm run step1
   · tx_origin / owner_check / price_oracle / timestamp_dep / total_supply
   ✓ payable_receive
 
-check-effect-interaction 위반:
+check-effect-interaction violation:
   ! claim(): token.transfer(...)  →  _mints += ...
 
-참조 property 랭킹:
+reference property ranking:
   → [score  7] reentrancy/NonReentrantLock
   → [score  6] reentrancy/CheckEffectInteraction
   → [score  5] money_flow/PerAccountUpperBound
@@ -110,14 +61,13 @@ check-effect-interaction 위반:
     [score  0] time_lock/MinDelay
 ```
 
-트랜잭션 히스토리 0건 상태에서 reentrancy를 1위로 검색했고, CEI 위반 함수를 자동으로 짚었다.
-**"신규 컨트랙트도 검색 단계는 API 없이 작동한다"가 여기서 확인된다.**
+Zero transaction history, no model call, deterministic — and the vulnerable function is located from structure alone. The top five are passed to stage 2 as in-context examples.
 
-### STEP 2 — LLM 생성
+## Stage 2 — generation
 
-두 경로가 있다. 결과물은 같다.
+Two paths. Same result.
 
-**(a) API 키가 있을 때**
+**(a) With an API key**
 
 ```bash
 # PowerShell
@@ -129,101 +79,94 @@ export ANTHROPIC_API_KEY=sk-ant-...
 npm run generate
 ```
 
-`ant auth login` 으로 프로필을 만들어 두었다면 환경변수 없이도 동작한다.
-결과는 콘솔에 출력되고 `out/invariants.json` 에 저장된다.
+An `ant auth login` profile also works with no environment variable. Output goes to the console and to `out/invariants.json`.
 
-**(b) API 크레딧 없이 — 웹 UI 로 수동 실행**
+**(b) Without API credits — run it by hand**
 
 ```bash
 npm run prompt
 ```
 
-`out/prompt.md` 에 API 가 보낼 것과 동일한 프롬프트가 쓰인다.
-SYSTEM PROMPT / USER MESSAGE / 스키마 블록을 claude.ai 새 대화에 붙여넣고,
-받은 JSON 을 `out/invariants.json` 으로 저장하면 이후 단계가 그대로 이어진다.
+Writes `out/prompt.md`, containing byte-for-byte what the API would receive. Paste the system prompt, user message, and schema block into a chat interface running the same model, then save the returned JSON as `out/invariants.json`. The rest of the pipeline continues unchanged.
 
-동일한 프롬프트·동일한 모델이므로 결과는 실제 실행 결과다.
-다만 출력이 스키마로 **강제**되지는 않으므로(웹 UI 에는 `output_config.format` 이 없다),
-받은 JSON 이 스키마를 지키는지 눈으로 확인할 것. 인용할 때는 실행 경로를 밝힐 것 —
-"generated via the web interface using the pipeline's prompt".
+Same prompt, same model, so the result is a real result — but note that the web interface has no `output_config.format`, so the schema is **requested rather than enforced**. Check the returned JSON against the schema by eye, and if you quote a figure obtained this way, say how it was obtained.
 
-### STEP 3 — Foundry 검증
+## Stage 3 — verification with Foundry
 
 ```bash
-# Foundry 설치 (없다면)
 curl -L https://foundry.paradigm.xyz | bash && foundryup
 
-forge init --force --no-commit .
 forge install foundry-rs/forge-std --no-commit
-forge install OpenZeppelin/openzeppelin-contracts@v4.9.6 --no-commit   # ERC777 은 v5 에서 제거됨
+forge install OpenZeppelin/openzeppelin-contracts@v4.9.6 --no-commit
 
 forge test --match-contract InvariantCheckTest -vv
 ```
 
-기대 결과 — **3개 모두 `[PASS]`**:
+> ⚠️ OpenZeppelin **v4.9.x is required**. ERC777 was removed in v5, so v5 will not compile.
 
-| 테스트 | 뜻 |
+Three tests, all expected to pass:
+
+| Test | Meaning |
 |---|---|
-| `testExploitSucceedsWithoutInvariant` | assert가 없으면 공격이 revert 없이 성공한다 (잔액 1,900) |
-| `testInvariantCatchesExploit` | invariant를 심으면 공격이 그것을 깬다 — Panic(0x01) |
-| `testInvariantAllowsBenign` | 정상 거래에서는 안 깨진다 (FP 0) |
+| `testExploitSucceedsWithoutInvariant` | Without an assert, the exploit succeeds silently — final balance 1,900 against a cap of 1,000 |
+| `testInvariantCatchesExploit` | With the invariant planted, the exploit breaks it — `Panic(0x01)` |
+| `testInvariantAllowsBenign` | Normal traffic does not break it — no false positive |
 
-> `testInvariantCatchesExploit` 은 `vm.expectRevert(stdError.assertionError)` 로 감쌌기 때문에
-> **탐지 성공 = PASS** 다. "FAIL이 정상"인 구조가 아니다.
+`testInvariantCatchesExploit` is wrapped in `vm.expectRevert(stdError.assertionError)`, so **detection succeeding means the test passes.** There is no "FAIL is expected" trap here.
 
 ---
 
-## 파일 구조
+## The target contract
+
+[DeFiVulnLabs / `SimpleBank`](https://github.com/SunWeb3Sec/DeFiVulnLabs/blob/main/src/test/ERC777-reentrancy.sol) — ERC777 reentrancy.
+
+`src/SimpleBank.sol` is the `SimpleBank` contract extracted from that file. **The logic is unmodified.** We removed one thing: the upstream comment `// Do not follow check-effect-interaction`, so the generator gets no hint about where the bug is.
+
+We chose DeFiVulnLabs over DeFiHackLabs on purpose. DeFiHackLabs replays real incidents, which needs a mainnet fork with an archive RPC and API keys — that would make "generated from source alone" impossible to test honestly.
+
+### The bug
+
+```solidity
+function claim(address account, uint256 amount) public returns (bool) {
+    require(_mints[account] + amount <= maxMintsPerAddress, "Exceeds max mints per address");
+
+    token.transfer(account, amount);   // interaction first
+    _mints[account] += amount;         // effect second   ← CEI violation
+
+    return true;
+}
+```
+
+Cap is 1,000; the attacker requests 900. During `transfer`, the ERC777 hook fires, the attacker reenters `claim(this, 1000)`, and `require` reads a `_mints` that is still zero. Both calls pass. Final balance: 1,900.
+
+---
+
+## Files
 
 ```
-generator/
-├── src/
-│   ├── SimpleBank.sol           대상 취약 컨트랙트 (DeFiVulnLabs 발췌, 로직 무수정)
-│   ├── reference_db.json        참조 property DB — 11개 항목, 손으로 작성
-│   ├── retrieve.mjs             STEP 1: 정적 signal 추출 + CEI 탐지 + 랭킹
-│   └── generate_invariants.mjs  CLI: STEP 1 + STEP 2 (Anthropic SDK)
-├── test/
-│   └── InvariantCheck.t.sol     STEP 3: Attacker / InvariantChecker / BenignUser
-├── demo.html                    브라우저 데모 — STEP 1 은 실제로 돌아감
-├── foundry.toml
-└── package.json
+src/SimpleBank.sol            the target contract (extracted from DeFiVulnLabs, logic unmodified)
+src/reference_db.json         reference property corpus — 11 entries, written by hand
+src/retrieve.mjs              stage 1: static signals, CEI detection, ranking
+src/generate_invariants.mjs   CLI: stage 1 + stage 2
+test/InvariantCheck.t.sol     stage 3: Attacker / InvariantChecker / BenignUser
 ```
 
----
-
-## 아직 검증되지 않은 것 (정직하게)
-
-생성 환경(Windows, Node v22)에는 **API 키도 `forge`도 없었다.** 따라서:
-
-- **STEP 2는 한 번도 실행되지 않았다.** LLM이 실제로 어떤 invariant를 뽑는지는 미확인이다.
-  `README`·`demo.html` 어디에도 지어낸 LLM 출력은 넣지 않았다.
-- **STEP 3의 Foundry 테스트는 컴파일조차 되지 않았다.** 위의 "기대 결과"는 코드에서 손으로 따라간 것이다.
-  최종 잔액 1,900은 DeFiVulnLabs 원본 주석
-  (*"Expect 900 (the claim amount), but we will get the 1,900 due to reenter to claim 1,000"*)과 일치한다.
-- `test/InvariantCheck.t.sol` 은 처음 `forge test` 를 돌릴 때 컴파일 에러가 날 수 있다
-  (특히 OZ v4 경로·pragma). 그건 정상적인 첫 실행이다.
+`retrieve.mjs` is ported to the browser in [`../web/assets/app.js`](../web/assets/app.js). **They must be kept in sync** — do not change one without the other.
 
 ---
 
-## 설계상 남는 한계
+## What is not measured
 
-1. **검색기가 임베딩이 아니다.** STEP 1은 정적 signal 매칭 기반의 lexical retriever다.
-   결정론적이고 오프라인이라는 게 장점이지만, 참조 DB에 없는 유형에는 일반화되지 않는다.
-   PropertyGPT의 실제 방식(Certora 리포트 임베딩 + 유사도 검색)과는 다르다.
-2. **참조 DB가 인간 property의 대용품이다.** 실제 Certora 감사 리포트를 임베딩한 게 아니라,
-   Trace2Inv의 8개 카테고리 체계를 따라 손으로 쓴 11개 항목이다.
-3. **결국 표준 카테고리에 몰린다.** money_flow, reentrancy 같은 교과서 항목은 나오지만
-   **프로토콜 고유 경제 invariant는 여전히 안 나온다** — 참조 DB에 없으니까.
-   그 부분이 Anam145 감사자의 몫이고, 이게 사업의 근거이기도 하다.
-4. **단일 컨트랙트 데모다.** 실제 서브넷은 마이너가 다양한 컨트랙트에 이걸 해야 하므로
-   규모 문제는 별개로 남는다.
+The build environment for this repository had neither an API key nor `forge` installed, so:
 
----
+- **Stage 2 has never been executed.** No generated invariant appears anywhere in this repository as a result.
+- **Stage 3 has never been compiled.** The expected outcomes above are derived by hand from the source. The final balance of 1,900 agrees with the upstream DeFiVulnLabs comment — *"Expect 900 (the claim amount), but we will get the 1,900 due to reenter to claim 1,000"* — but agreement with a comment is not a measurement.
+- The first `forge test` may well fail to compile (OZ v4 paths, pragma). That is a normal first run, not a hidden result.
 
-## 근거 출처
+See [`../docs/evidence.md`](../docs/evidence.md) for the full accounting.
 
-| 주장 | 출처 | 상태 |
-|---|---|---|
-| 배포 컨트랙트: 23/27 차단 @ FP 3.99% · 20/27 @ FP 0.28% | Trace2Inv (MIT), Docker 재현 — 저자 Expected 파일과 일치 | 직접 재현 |
-| 신규 컨트랙트: recall 80%, 0-day 12건 | PropertyGPT (NDSS 2025) 논문값. 프로토타입은 MetaTrust Labs가 상업화, 비공개 | 인용 · 재현 불가 |
-| 대상 취약 컨트랙트 | DeFiVulnLabs (MIT) | 원본 그대로 |
+## Design limitations
+
+1. **The retriever is lexical, not embedding-based.** Deterministic and offline, which suits a demo, but it does not generalize to classes absent from the corpus. PropertyGPT's actual method — embedding real Certora reports and searching by similarity — is different and stronger.
+2. **The corpus is a stand-in for human properties.** Eleven entries written by hand following Trace2Inv's eight-category taxonomy, not an embedding of real audit reports.
+3. **Output clusters in standard categories.** Protocol-specific economic invariants do not come out, because they are not in the corpus. That tier belongs to auditors.

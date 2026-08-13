@@ -1,12 +1,14 @@
-// STEP 1 — RAG 검색 (정적 signal 추출 + 참조 property 랭킹)
+// Stage 1 — retrieval (static signal extraction + reference property ranking)
 //
-// 입력: Solidity 소스 문자열 하나. 트랜잭션 히스토리는 쓰지 않는다.
-// 출력: { signals, ranked } — 신규 컨트랙트에서도 API 키 없이 로컬로 돌아간다.
+// Input: one Solidity source string. No transaction history is used.
+// Output: { signals, ceiViolations, ranked, selected } — runs locally with no
+// API key, which is the point: it works on a contract deployed minutes ago.
 //
-// 이건 임베딩 검색이 아니라 lexical/정적 retriever다. 결정론적이고 오프라인이라는 것이
-// 장점이고, 의미적 일반화가 안 된다는 것이 한계다 (README의 "정직하게 남는 한계" 참고).
+// This is a lexical/static retriever, not an embedding search. Deterministic
+// and offline, which is its strength; no semantic generalization, which is its
+// weakness. See the limitations section of the README.
 
-/** 컨트랙트 본문에서 상태 변수(특히 mapping) 이름을 수집한다. */
+/** Collect state variable names (mappings especially) from the contract body. */
 function collectStateVars(src) {
   const names = new Set();
   const re =
@@ -16,7 +18,7 @@ function collectStateVars(src) {
   return names;
 }
 
-/** `function name(...) ... { body }` 를 중괄호 매칭으로 잘라낸다. */
+/** Split out `function name(...) ... { body }` by brace matching. */
 function extractFunctions(src) {
   const out = [];
   const header = /function\s+(\w+)\s*\(/g;
@@ -43,8 +45,9 @@ function extractFunctions(src) {
 }
 
 /**
- * CEI(check-effect-interaction) 위반 탐지.
- * 함수 본문에서 "외부 호출"이 "상태 변수 쓰기"보다 먼저 나오면 위반으로 본다.
+ * Detect check-effect-interaction violations.
+ * Within a function body, an external call appearing before a state variable
+ * write counts as a violation.
  */
 export function detectCEIViolations(src) {
   const stateVars = collectStateVars(src);
@@ -57,7 +60,7 @@ export function detectCEIViolations(src) {
     let callSite = null;
     let c;
     while ((c = callRe.exec(fn.body)) !== null) {
-      // 지역 계산이 아니라 외부 컨트랙트/주소로의 호출만 센다.
+      // Only calls out to another contract or address count, not local math.
       if (c.index < firstCall) {
         firstCall = c.index;
         callSite = `${c[1]}.${c[2]}(...)`;
@@ -68,7 +71,7 @@ export function detectCEIViolations(src) {
     const writeRe = /\b(\w+)\s*(?:\[[^\]]*\]\s*)?(\+=|-=|=)(?!=)/g;
     let w;
     while ((w = writeRe.exec(fn.body)) !== null) {
-      if (!stateVars.has(w[1])) continue; // 지역변수 무시
+      if (!stateVars.has(w[1])) continue; // skip locals
       if (w.index > firstCall) {
         violations.push({
           fn: fn.name,
@@ -82,7 +85,7 @@ export function detectCEIViolations(src) {
   return violations;
 }
 
-/** 소스에서 정적 signal 을 뽑는다. */
+/** Extract static signals from the source. */
 export function extractSignals(src) {
   const ceiViolations = detectCEIViolations(src);
   const has = (re) => re.test(src);
@@ -105,7 +108,7 @@ export function extractSignals(src) {
   return { signals, ceiViolations };
 }
 
-/** 참조 DB의 property 를 signal 매칭 점수로 랭킹한다. */
+/** Rank the reference corpus by signal-match score. */
 export function rankProperties(signals, db) {
   return db.properties
     .map((p) => {

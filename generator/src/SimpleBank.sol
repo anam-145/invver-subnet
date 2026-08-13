@@ -5,19 +5,19 @@ import "forge-std/Test.sol";
 import "@openzeppelin/contracts/token/ERC777/ERC777.sol";
 
 /*
-  TARGET CONTRACT — 이 파일이 invariant 생성기(STEP 1/2)의 유일한 입력이다.
+  TARGET CONTRACT — the only input to the invariant generator (stages 1 and 2).
 
-  출처 (수정 없이 발췌):
+  Source (extracted without modifying the logic):
     https://github.com/SunWeb3Sec/DeFiVulnLabs/blob/main/src/test/ERC777-reentrancy.sol
 
-  취약점: ERC777 tokensReceived 훅을 통한 reentrancy.
-  claim()이 check-effect-interaction 을 지키지 않는다 —
-  token.transfer() (interaction) 를 _mints[account] += amount (effect) 보다 먼저 호출한다.
-  공격자는 훅 안에서 claim()을 재진입해 계정당 상한 1,000을 우회할 수 있다.
+  Vulnerability: reentrancy through the ERC777 tokensReceived hook.
+  claim() does not follow check-effect-interaction — it calls token.transfer()
+  (the interaction) before _mints[account] += amount (the effect). An attacker
+  reenters claim() from inside the hook and bypasses the per-account cap of 1,000.
 
-  이 파일에는 "취약하다"는 힌트를 주는 주석을 일부러 남겨두지 않았다 —
-  LLM이 코드 구조만 보고 invariant를 뽑아내는지 검증하기 위함이다.
-  (원본의 `// Do not follow check-effect-interaction` 주석은 제거했다.)
+  No comment hinting at the bug is left in this file, on purpose: the point is to
+  test whether the model derives the invariants from code structure alone. The
+  upstream `// Do not follow check-effect-interaction` comment was removed.
 */
 
 contract SimpleBank is Test {

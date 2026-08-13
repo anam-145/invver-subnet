@@ -1,19 +1,23 @@
 #!/usr/bin/env node
-// PropertyGPT식 RAG invariant 생성기
+// RAG invariant generator (PropertyGPT-style).
 //
-//   STEP 1  RAG 검색   : 참조 property DB에서 이 코드에 맞는 property 를 뽑는다 (로컬, 무료, 결정론적)
-//   STEP 2  LLM 생성   : 검색된 property 를 in-context 예시로 주고, 이 컨트랙트 고유의 invariant 를 생성한다
-//   STEP 3  검증(별도) : 생성된 invariant 를 assert 로 심고 공격이 깨는지 Foundry 로 확인 (test/InvariantCheck.t.sol)
+//   STAGE 1  Retrieval    Rank a reference property corpus against static signals
+//                         extracted from the source. Local, free, deterministic.
+//   STAGE 2  Generation   Hand the retrieved properties to a model as in-context
+//                         examples; get back invariants specific to this contract.
+//   STAGE 3  Verification (separate) Plant the assert, run an exploit against it
+//                         in a forked EVM — see test/InvariantCheck.t.sol
 //
-// 사용법:
-//   node src/generate_invariants.mjs src/SimpleBank.sol                  # STEP 1 + 2
-//   node src/generate_invariants.mjs src/SimpleBank.sol --step1          # STEP 1 만 (API 키 불필요)
-//   node src/generate_invariants.mjs src/SimpleBank.sol --print-prompt   # 프롬프트만 파일로 (API 키 불필요)
+// Usage:
+//   node src/generate_invariants.mjs src/SimpleBank.sol                  # stage 1 + 2
+//   node src/generate_invariants.mjs src/SimpleBank.sol --step1          # stage 1 only (no API key)
+//   node src/generate_invariants.mjs src/SimpleBank.sol --print-prompt   # write the prompt to a file (no API key)
 //
-// --print-prompt 는 STEP 2 가 API 로 보낼 프롬프트를 out/prompt.md 에 그대로 쓴다.
-// API 크레딧 없이도 claude.ai 같은 웹 UI 에 붙여넣어 동일한 결과를 얻을 수 있다.
+// --print-prompt writes exactly what stage 2 would send to out/prompt.md, so the
+// same result can be obtained by pasting it into a chat interface when no API
+// credits are available.
 //
-// 인증: ANTHROPIC_API_KEY 환경변수, 또는 `ant auth login` 프로필.
+// Auth: ANTHROPIC_API_KEY, or an `ant auth login` profile.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -44,37 +48,40 @@ const INVARIANT_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          id: {
-            type: "string",
-            description: "INV-1 형태의 짧은 식별자",
-          },
+          id: { type: "string", description: "Short identifier, e.g. INV-1" },
           category: { type: "string", enum: CATEGORIES },
           statement: {
             type: "string",
-            description: "이 컨트랙트에서 항상 참이어야 하는 성질. 한 문장.",
+            description:
+              "A property that must always hold for this contract. One sentence.",
           },
           solidity_assert: {
             type: "string",
             description:
-              "Foundry 테스트에 그대로 붙여넣을 수 있는 단일 assert 문. 예: assert(bank._mints(user) <= bank.maxMints());",
+              "A single assert statement that can be pasted into a Foundry test verbatim. " +
+              "Example: assert(bank._mints(user) <= bank.maxMints());",
           },
           rationale: {
             type: "string",
-            description: "이 invariant 가 왜 필요한지, 코드의 어느 부분에 근거하는지",
+            description:
+              "Why this invariant is needed and which part of the code it rests on",
           },
           breaks_if: {
             type: "string",
-            description: "이 invariant 가 깨진다면 어떤 공격이 성립한 것인지",
+            description:
+              "If this invariant breaks, what attack has succeeded",
           },
           derived_from: {
             type: "array",
             items: { type: "string" },
-            description: "참고한 reference property 의 id 목록 (없으면 빈 배열)",
+            description:
+              "Ids of the reference properties this drew on; empty array if none",
           },
           protocol_specific: {
             type: "boolean",
             description:
-              "표준 카테고리를 그대로 옮긴 것이 아니라 이 프로토콜 고유의 경제 로직에서 나온 invariant 인지",
+              "True if this comes from this protocol's own economic logic rather than " +
+              "being a standard category transplanted onto it",
           },
           confidence: { type: "string", enum: ["high", "medium", "low"] },
         },
@@ -94,33 +101,33 @@ const INVARIANT_SCHEMA = {
     },
     summary: {
       type: "string",
-      description: "코드에서 관찰한 위험 지점 요약. 2~3문장.",
+      description: "The risk you observed in the code. Two or three sentences.",
     },
   },
   required: ["invariants", "summary"],
   additionalProperties: false,
 };
 
-const SYSTEM_PROMPT = `너는 스마트컨트랙트 형식검증 엔지니어다. 주어진 Solidity 소스 코드만 보고, 그 컨트랙트에서 항상 참이어야 하는 invariant 를 도출한다.
+const SYSTEM_PROMPT = `You are a smart contract formal-verification engineer. Given only Solidity source, derive the invariants that must always hold for that contract.
 
-지켜야 할 규칙:
+Rules:
 
-1. 트랜잭션 히스토리나 배포 이력은 주어지지 않는다. 코드 구조만 근거로 삼는다.
-2. 각 invariant 는 반드시 실행 가능한 단일 Solidity assert 문으로 표현할 수 있어야 한다. "안전해야 한다" 같은 서술은 invariant 가 아니다.
-3. 사후 조건(post-condition)을 노려라. 함수 진입 시점의 require 검사가 이미 있는 성질이라도, 트랜잭션 '종료 시점'에 그것이 여전히 성립하는지는 별개의 성질이다. 이 간극이 재진입 취약점이 숨는 자리다.
-4. 참조 property 는 출발점일 뿐이다. 그대로 베끼지 말고 이 컨트랙트의 실제 변수명·함수명·상한값에 맞게 구체화하라.
-5. 가능하면 protocol_specific=true 인 invariant 를 최소 하나 만들어라. 표준 카테고리를 옮긴 것이 아니라, 이 컨트랙트의 경제 로직에서만 나오는 성질이어야 한다.
-6. solidity_assert 는 외부에서 읽을 수 있는 getter 만 사용하라 (public 변수의 자동 getter 포함). private 변수를 직접 참조하지 마라.
-7. 근거 없는 invariant 를 지어내지 마라. 확신이 낮으면 confidence 를 낮게 매겨라.`;
+1. You are given no transaction history and no deployment record. Reason from code structure alone.
+2. Every invariant must be expressible as a single executable Solidity assert statement. A sentence like "the contract should be safe" is not an invariant.
+3. Target post-conditions. Even where a require check already enforces a property at function entry, whether it still holds at transaction *end* is a separate property. That gap is where reentrancy hides.
+4. The reference properties are a starting point, not a template. Do not copy them — specialize them to this contract's actual variable names, function names, and bounds.
+5. Where possible, produce at least one invariant with protocol_specific=true: a property that comes from this contract's own economic logic rather than a standard category transplanted onto it.
+6. solidity_assert may only use externally readable getters, including the automatic getters of public variables. Do not reference private variables directly.
+7. Do not invent invariants you cannot ground in the code. If your confidence is low, say so in the confidence field.`;
 
 function buildUserPrompt(sourcePath, source, retrieval) {
   const refs = retrieval.selected
     .map(
       (p, i) =>
-        `${i + 1}. [${p.id}] (검색 점수 ${p.score} — 매칭 signal: ${p.matched.join(", ")})
-   성질: ${p.statement}
-   형식화 스케치: ${p.formal_sketch}
-   근거: ${p.why}`
+        `${i + 1}. [${p.id}] (retrieval score ${p.score} — matched signals: ${p.matched.join(", ")})
+   Property: ${p.statement}
+   Formal sketch: ${p.formal_sketch}
+   Rationale: ${p.why}`
     )
     .join("\n\n");
 
@@ -128,58 +135,58 @@ function buildUserPrompt(sourcePath, source, retrieval) {
     ? retrieval.ceiViolations
         .map(
           (v) =>
-            `- 함수 ${v.fn}(): 외부 호출 \`${v.call}\` 이 상태 갱신 \`${v.write}\` 보다 먼저 실행됨`
+            `- ${v.fn}(): the external call \`${v.call}\` executes before the state write \`${v.write}\``
         )
         .join("\n")
-    : "- 없음";
+    : "- none";
 
-  return `## 대상 컨트랙트 (${sourcePath})
+  return `## Target contract (${sourcePath})
 
 \`\`\`solidity
 ${source}
 \`\`\`
 
-## 정적 분석 결과 (STEP 1)
+## Static analysis (stage 1)
 
-탐지된 signal:
+Detected signals:
 ${Object.entries(retrieval.signals)
   .filter(([, v]) => v)
   .map(([k]) => `- ${k}`)
   .join("\n")}
 
-check-effect-interaction 순서 위반:
+Check-effect-interaction ordering violations:
 ${cei}
 
-## 검색된 참조 property (STEP 1 — 인간이 쓴 감사 property DB에서 상위 ${retrieval.selected.length}개)
+## Retrieved reference properties (stage 1 — top ${retrieval.selected.length} from a corpus of human-written audit properties)
 
 ${refs}
 
-## 요청
+## Task
 
-위 코드에 대해 invariant 를 3~6개 생성하라. 각각은 실행 가능한 assert 로 표현되어야 하고, 최소 하나는 이 컨트랙트의 재진입 경로를 실제로 잡아낼 수 있어야 한다.`;
+Produce 3 to 6 invariants for the code above. Each must be expressed as an executable assert, and at least one must be capable of catching this contract's reentrancy path.`;
 }
 
 function printStep1(sourcePath, retrieval) {
   console.log("═".repeat(72));
-  console.log("STEP 1 — RAG 검색 (로컬, API 키 불필요)");
+  console.log("STAGE 1 — retrieval (local, no API key)");
   console.log("═".repeat(72));
-  console.log(`대상: ${sourcePath}\n`);
+  console.log(`target: ${sourcePath}\n`);
 
-  console.log("탐지된 signal:");
+  console.log("detected signals:");
   for (const [k, v] of Object.entries(retrieval.signals)) {
     console.log(`  ${v ? "✓" : "·"} ${k}`);
   }
 
-  console.log("\ncheck-effect-interaction 위반:");
+  console.log("\ncheck-effect-interaction violations:");
   if (retrieval.ceiViolations.length === 0) {
-    console.log("  (없음)");
+    console.log("  (none)");
   } else {
     for (const v of retrieval.ceiViolations) {
       console.log(`  ! ${v.fn}(): ${v.call}  →  ${v.write}`);
     }
   }
 
-  console.log("\n참조 property 랭킹:");
+  console.log("\nreference property ranking:");
   for (const p of retrieval.ranked) {
     const mark = retrieval.selected.includes(p) ? "→" : " ";
     console.log(
@@ -189,13 +196,13 @@ function printStep1(sourcePath, retrieval) {
     );
   }
   console.log(
-    `\n상위 ${retrieval.selected.length}개를 STEP 2 의 in-context 예시로 넘긴다.\n`
+    `\nThe top ${retrieval.selected.length} are passed to stage 2 as in-context examples.\n`
   );
 }
 
 async function step2(sourcePath, source, retrieval) {
   console.log("═".repeat(72));
-  console.log(`STEP 2 — LLM invariant 생성 (${MODEL})`);
+  console.log(`STAGE 2 — invariant generation (${MODEL})`);
   console.log("═".repeat(72));
 
   const client = new Anthropic();
@@ -214,18 +221,18 @@ async function step2(sourcePath, source, retrieval) {
   });
 
   if (response.stop_reason === "refusal") {
-    console.error("모델이 요청을 거부했습니다:", response.stop_details);
+    console.error("The model declined the request:", response.stop_details);
     process.exit(1);
   }
   if (response.stop_reason === "max_tokens") {
-    console.error("출력이 max_tokens 에서 잘렸습니다. max_tokens 를 올리세요.");
+    console.error("Output was truncated at max_tokens. Raise max_tokens.");
     process.exit(1);
   }
 
   const text = response.content.find((b) => b.type === "text")?.text ?? "";
   const result = JSON.parse(text);
 
-  console.log(`\n요약: ${result.summary}\n`);
+  console.log(`\nSummary: ${result.summary}\n`);
   for (const inv of result.invariants) {
     console.log("─".repeat(72));
     console.log(
@@ -233,19 +240,19 @@ async function step2(sourcePath, source, retrieval) {
         inv.protocol_specific ? "  ★ protocol-specific" : ""
       }`
     );
-    console.log(`  성질   : ${inv.statement}`);
-    console.log(`  assert : ${inv.solidity_assert}`);
-    console.log(`  근거   : ${inv.rationale}`);
-    console.log(`  깨지면 : ${inv.breaks_if}`);
+    console.log(`  property  : ${inv.statement}`);
+    console.log(`  assert    : ${inv.solidity_assert}`);
+    console.log(`  rationale : ${inv.rationale}`);
+    console.log(`  breaks if : ${inv.breaks_if}`);
     if (inv.derived_from.length) {
-      console.log(`  참조    : ${inv.derived_from.join(", ")}`);
+      console.log(`  derived   : ${inv.derived_from.join(", ")}`);
     }
   }
   console.log("─".repeat(72));
 
   const u = response.usage;
   console.log(
-    `\n토큰: input=${u.input_tokens} output=${u.output_tokens}` +
+    `\ntokens: input=${u.input_tokens} output=${u.output_tokens}` +
       (u.cache_read_input_tokens
         ? ` cache_read=${u.cache_read_input_tokens}`
         : "")
@@ -255,21 +262,21 @@ async function step2(sourcePath, source, retrieval) {
 }
 
 /**
- * API 크레딧 없이 STEP 2 를 돌리기 위한 경로.
- * API 가 받을 것과 바이트 단위로 같은 프롬프트를 파일로 쓴다.
+ * Path for running stage 2 without API credits: write the prompt the API would
+ * receive, byte for byte, so it can be pasted into a chat interface.
  */
 function writePromptFile(target, source, retrieval) {
   const outDir = path.resolve(process.cwd(), "out");
   fs.mkdirSync(outDir, { recursive: true });
   const outFile = path.join(outDir, "prompt.md");
 
-  const body = `# STEP 2 프롬프트 (${target})
+  const body = `# Stage 2 prompt (${target})
 
-생성기가 \`${MODEL}\` 에 보내는 것과 동일한 프롬프트다.
-API 크레딧 없이 돌리려면: 아래 두 블록을 claude.ai 새 대화에 그대로 붙여넣어라.
-(권장 설정: 모델 ${MODEL}, extended thinking on)
+This is exactly what the generator sends to \`${MODEL}\`.
 
-받은 JSON 을 \`out/invariants.json\` 으로 저장하면 나머지 파이프라인이 그대로 이어진다.
+To run stage 2 without API credits, paste the two blocks below into a new chat
+(recommended settings: model ${MODEL}, extended thinking on). Save the returned
+JSON as \`out/invariants.json\` and the rest of the pipeline continues unchanged.
 
 ---
 
@@ -287,12 +294,13 @@ ${buildUserPrompt(target, source, retrieval)}
 
 ---
 
-## 3. 출력 형식 지시 (API 에서는 output_config.format 으로 강제되는 부분)
+## 3. Output format instruction
 
-웹 UI 에는 스키마 강제 기능이 없으므로, 위 USER MESSAGE 끝에 다음을 덧붙여라:
+The API enforces this through \`output_config.format\`. A chat interface has no
+equivalent, so append the following to the user message above:
 
 \`\`\`
-아래 JSON 스키마를 정확히 따르는 JSON 객체 하나만 출력하라. 다른 텍스트는 쓰지 마라.
+Output a single JSON object conforming exactly to the schema below. Write nothing else.
 
 ${JSON.stringify(INVARIANT_SCHEMA, null, 2)}
 \`\`\`
@@ -310,7 +318,7 @@ async function main() {
 
   const sourcePath = path.resolve(process.cwd(), target);
   if (!fs.existsSync(sourcePath)) {
-    console.error(`파일을 찾을 수 없습니다: ${sourcePath}`);
+    console.error(`File not found: ${sourcePath}`);
     process.exit(1);
   }
   const source = fs.readFileSync(sourcePath, "utf8");
@@ -322,20 +330,20 @@ async function main() {
   printStep1(target, retrieval);
 
   if (step1Only) {
-    console.log("(--step1 지정: STEP 2 를 건너뜁니다)");
+    console.log("(--step1: skipping stage 2)");
     return;
   }
 
   if (promptOnly) {
     const rel = writePromptFile(target, source, retrieval);
     console.log("═".repeat(72));
-    console.log("STEP 2 프롬프트를 파일로 출력했습니다 (API 호출 없음)");
+    console.log("Stage 2 prompt written to a file (no API call made)");
     console.log("═".repeat(72));
     console.log(`\n  ${rel}\n`);
-    console.log("다음:");
-    console.log("  1. 이 파일을 열어 SYSTEM PROMPT / USER MESSAGE 를 claude.ai 에 붙여넣는다");
-    console.log("  2. 받은 JSON 을 out/invariants.json 으로 저장한다");
-    console.log("  3. 그 JSON 의 solidity_assert 를 test/InvariantCheck.t.sol 에 심는다");
+    console.log("Next:");
+    console.log("  1. Open it and paste the system prompt and user message into a chat interface");
+    console.log("  2. Save the returned JSON as out/invariants.json");
+    console.log("  3. Plant its solidity_assert values in test/InvariantCheck.t.sol");
     return;
   }
 
@@ -352,21 +360,21 @@ async function main() {
       2
     )
   );
-  console.log(`\n결과 저장: ${path.relative(process.cwd(), outFile)}`);
+  console.log(`\nSaved: ${path.relative(process.cwd(), outFile)}`);
   console.log(
-    "다음: 생성된 assert 를 test/InvariantCheck.t.sol 에 심고 `forge test` 로 검증하세요."
+    "Next: plant the generated asserts in test/InvariantCheck.t.sol and run `forge test`."
   );
 }
 
 main().catch((err) => {
   if (err instanceof Anthropic.AuthenticationError) {
     console.error(
-      "\n인증 실패. ANTHROPIC_API_KEY 를 설정하거나 `ant auth login` 을 실행하세요."
+      "\nAuthentication failed. Set ANTHROPIC_API_KEY, or run `ant auth login`."
     );
   } else if (err instanceof Anthropic.RateLimitError) {
-    console.error("\nRate limit. 잠시 후 다시 시도하세요.");
+    console.error("\nRate limited. Retry shortly.");
   } else {
-    console.error("\n실패:", err.message);
+    console.error("\nFailed:", err.message);
   }
   process.exit(1);
 });
