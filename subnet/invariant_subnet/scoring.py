@@ -14,6 +14,7 @@ Run the tests:  python -m unittest discover tests -v
 
 from __future__ import annotations
 
+import math
 from typing import Iterable, Sequence
 
 from .protocol import (
@@ -30,6 +31,14 @@ MINIMALITY_FLOOR_CALLS = 3
 
 #: Floor on the minimality factor, so a long-but-real exploit still pays.
 MINIMALITY_MIN_FACTOR = 0.4
+
+#: Floor on the impact factor. An invariant can break without moving value —
+#: that is still a real finding, just not a headline one.
+IMPACT_MIN_FACTOR = 0.2
+
+#: Orders of magnitude below the target's published reference at which impact
+#: reaches the floor. Three decades: reference/1000 and below all score the floor.
+IMPACT_DECADES = 3.0
 
 
 class FindingLedger:
@@ -68,6 +77,25 @@ def minimality_factor(call_count: int) -> float:
         return 1.0
     factor = MINIMALITY_FLOOR_CALLS / call_count
     return max(MINIMALITY_MIN_FACTOR, factor)
+
+
+def impact_factor(impact: float, reference: float) -> float:
+    """Rank valid proof-of-concepts by how much state they actually moved.
+
+    Log-scaled against the target's published reference, because the difference
+    between draining 1% and 10% of a protocol matters more than the difference
+    between 90% and 99%. Draining the reference amount or more scores 1.0;
+    three decades below it scores the floor.
+
+    ``impact`` is read off the post-state by the harness, never asserted by the
+    miner, and ``reference`` is published with the target before competition —
+    so this stays a pure function of things fixed in advance.
+    """
+    if impact <= 0 or reference <= 0:
+        return IMPACT_MIN_FACTOR if impact <= 0 else 1.0
+    decades = math.log10(impact / reference)
+    scaled = 1.0 + decades / IMPACT_DECADES
+    return max(IMPACT_MIN_FACTOR, min(1.0, scaled))
 
 
 def score_submission(
@@ -135,13 +163,18 @@ def score_submission(
             reasons=tuple(reasons),
         )
 
-    factor = minimality_factor(result.call_count)
-    reasons.append(f"minimality: {result.call_count} calls → x{factor:.2f}")
+    impact = impact_factor(result.impact, target.impact_reference)
+    minimality = minimality_factor(result.call_count)
+    reasons.append(
+        f"impact: {result.impact:g} {target.impact_unit} "
+        f"vs reference {target.impact_reference:g} → x{impact:.2f}"
+    )
+    reasons.append(f"minimality: {result.call_count} calls → x{minimality:.2f}")
 
     return ScoredSubmission(
         submission_id=result.submission_id,
         miner_hotkey=result.miner_hotkey,
-        score=best_weight * factor,
+        score=best_weight * impact * minimality,
         novel_findings=tuple(novel),
         duplicate_findings=tuple(duplicate),
         reasons=tuple(reasons),

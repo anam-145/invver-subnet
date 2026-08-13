@@ -39,10 +39,13 @@ The failure mode of most security-subnet proposals is the opposite property: fre
 
 Given a target contract and its published invariant set, miners search for a transaction sequence that makes at least one invariant fail. Ranking factors, in order:
 
-1. **Did an invariant break at all** — binary, from execution.
+1. **Did an invariant break at all** — binary, from execution. Nothing below this line scores.
 2. **Which one** — severity is a property of the invariant class, fixed and published *before* submissions open. Nobody argues severity after the fact.
 3. **Novelty** — first to break a given invariant on a given target. Duplicates collapse under the novelty key (§5).
-4. **Minimality** — shorter proof-of-concept wins ties. Also cheap to measure: count the calls.
+4. **Impact** — how much state the execution actually moved, read off the post-state by the harness and never asserted by the miner. Log-scaled against a reference published with the target, so the gap between draining 1% and 10% of a protocol counts for more than the gap between 90% and 99%. Zero impact still scores at a floor: an invariant can break without moving value, and that is still a real finding.
+5. **Minimality** — shorter proof-of-concept wins ties. Also cheap to measure: count the calls.
+
+Implemented as a pure function in [`subnet/invariant_subnet/scoring.py`](../subnet/invariant_subnet/scoring.py), 25 tests.
 
 ## 4. Where invariants come from
 
@@ -81,7 +84,7 @@ Stated plainly rather than glossed:
 | Invariant retrieval from source | Working, measured | [`generator/src/retrieve.mjs`](../generator/src/retrieve.mjs) |
 | LLM invariant generation | Implemented, not yet run | [`generator/src/generate_invariants.mjs`](../generator/src/generate_invariants.mjs) |
 | Exploit / assert harness | Written, not yet executed | [`generator/test/InvariantCheck.t.sol`](../generator/test/InvariantCheck.t.sol) |
-| Scoring rule | Implemented as a pure function | [`subnet/invariant_subnet/scoring.py`](../subnet/invariant_subnet/scoring.py) |
+| Scoring rule | Implemented as a pure function, 25 tests | [`subnet/invariant_subnet/scoring.py`](../subnet/invariant_subnet/scoring.py) |
 | Miner / validator neurons | Skeleton only | [`subnet/neurons/`](../subnet/neurons) |
 | Network activity monitoring | Skeleton only | [`subnet/invariant_subnet/monitor.py`](../subnet/invariant_subnet/monitor.py) |
 | Testnet deployment | Not started | — |

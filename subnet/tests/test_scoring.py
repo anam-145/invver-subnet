@@ -16,17 +16,23 @@ from invariant_subnet.protocol import (  # noqa: E402
     Target,
 )
 from invariant_subnet.scoring import (  # noqa: E402
+    IMPACT_MIN_FACTOR,
     FindingLedger,
+    impact_factor,
     minimality_factor,
     normalize_weights,
     score_round,
     score_submission,
 )
 
+REFERENCE = 1000.0  # the target's published full-credit impact
+
 TARGET = Target(
     id="simplebank",
     name="DeFiVulnLabs / SimpleBank",
     source_uri="generator/src/SimpleBank.sol",
+    impact_unit="tokens",
+    impact_reference=REFERENCE,
     invariants=(
         Invariant(
             id="INV-1",
@@ -52,6 +58,7 @@ def result(
     broken=("INV-1",),
     calls=4,
     delta="deadbeefcafe0001",
+    impact=REFERENCE,  # full-credit impact unless a test says otherwise
     error=None,
 ):
     return ExecutionResult(
@@ -61,6 +68,7 @@ def result(
         broken_invariant_ids=broken,
         call_count=calls,
         state_delta_hash=delta,
+        impact=impact,
         error=error,
     )
 
@@ -141,6 +149,49 @@ class TestNovelty(unittest.TestCase):
         s = score_submission(result(), TARGET, ledger)
         self.assertEqual(s.score, 0.0)
         self.assertTrue(any("public_disclosure" in r for r in s.reasons))
+
+
+class TestImpact(unittest.TestCase):
+    """Impact ranks valid proof-of-concepts. It never decides validity —
+    that is the invariant's job."""
+
+    def test_impact_at_reference_is_full_credit(self):
+        self.assertAlmostEqual(impact_factor(REFERENCE, REFERENCE), 1.0)
+
+    def test_impact_above_reference_is_capped(self):
+        self.assertAlmostEqual(impact_factor(REFERENCE * 100, REFERENCE), 1.0)
+
+    def test_impact_below_reference_scores_lower(self):
+        self.assertLess(
+            impact_factor(REFERENCE / 10, REFERENCE),
+            impact_factor(REFERENCE, REFERENCE),
+        )
+
+    def test_impact_factor_is_bounded_below(self):
+        self.assertEqual(impact_factor(REFERENCE / 10**9, REFERENCE), IMPACT_MIN_FACTOR)
+
+    def test_zero_impact_still_scores_at_the_floor(self):
+        """An invariant can break without moving value. Still a real finding."""
+        s = score_submission(result(impact=0.0, calls=3), TARGET, FindingLedger())
+        self.assertGreater(s.score, 0.0)
+        self.assertAlmostEqual(s.score, 1.0 * IMPACT_MIN_FACTOR)
+
+    def test_larger_impact_outranks_smaller_for_the_same_invariant(self):
+        big = score_submission(
+            result(sub_id="s1", miner="a", delta="aaaa", impact=REFERENCE, calls=3),
+            TARGET,
+            FindingLedger(),
+        )
+        small = score_submission(
+            result(sub_id="s2", miner="b", delta="bbbb", impact=REFERENCE / 100, calls=3),
+            TARGET,
+            FindingLedger(),
+        )
+        self.assertGreater(big.score, small.score)
+
+    def test_negative_impact_is_rejected(self):
+        with self.assertRaises(ValueError):
+            result(impact=-1.0)
 
 
 class TestMinimality(unittest.TestCase):

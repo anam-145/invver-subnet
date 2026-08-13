@@ -44,12 +44,20 @@ class Invariant:
 
 @dataclass(frozen=True)
 class Target:
-    """A contract opened for exploitation, with its published invariant set."""
+    """A contract opened for exploitation, with its published invariant set.
+
+    ``impact_reference`` is the state-change magnitude that counts as a full-credit
+    exploit for this target — total value at risk, total supply, whatever the unit
+    of ``ExecutionResult.impact`` is. Published with the target so that impact
+    ranking is fixed before competition rather than fitted to submissions.
+    """
 
     id: str
     name: str
     source_uri: str
     invariants: tuple[Invariant, ...]
+    impact_unit: str = "wei"
+    impact_reference: float = 0.0
 
     def invariant(self, invariant_id: str) -> Invariant:
         for inv in self.invariants:
@@ -82,6 +90,11 @@ class ExecutionResult:
     ``state_delta_hash`` is a hash of the minimized post-execution state diff.
     It is what makes two functionally identical exploits collapse to one
     novelty key even when their source differs.
+
+    ``impact`` is the measured magnitude of the state change, in the target's
+    ``impact_unit`` — net asset loss, tokens minted without authorization, value
+    frozen. It is read off the post-state, never asserted by the miner. Zero is
+    legitimate: an invariant can break without moving value.
     """
 
     submission_id: str
@@ -90,7 +103,12 @@ class ExecutionResult:
     broken_invariant_ids: tuple[str, ...]
     call_count: int
     state_delta_hash: str
+    impact: float = 0.0
     error: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.impact < 0:
+            raise ValueError("impact is a magnitude and cannot be negative")
 
     @property
     def ok(self) -> bool:

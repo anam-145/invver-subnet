@@ -9,7 +9,7 @@ Miner, validator, and network monitoring.
 | Module | State | Notes |
 |---|---|---|
 | `invariant_subnet/protocol.py` | ✅ Implemented | Wire types. All frozen, because scoring has to be a pure function of them |
-| `invariant_subnet/scoring.py` | ✅ Implemented · 18 tests passing | **The scoring rule.** This is where the project's central claim lives |
+| `invariant_subnet/scoring.py` | ✅ Implemented · 25 tests passing | **The scoring rule.** This is where the project's central claim lives |
 | `invariant_subnet/monitor.py` | ◐ Partial | Local aggregation works. Chain queries raise `NotImplementedError` |
 | `neurons/validator.py` | ⬜ Skeleton | Loop shape only; every unimplemented step raises |
 | `neurons/miner.py` | ⬜ Skeleton | Same |
@@ -26,7 +26,7 @@ python -m unittest discover tests -v
 ```
 
 ```
-Ran 18 tests in 0.002s
+Ran 25 tests in 0.002s
 OK
 ```
 
@@ -38,11 +38,19 @@ OK
 
 | Factor | Rule |
 |---|---|
+| **Validity** | Did an invariant break? Binary, from execution. Nothing below this line scores at all |
 | **Severity** | Attached to the invariant class and fixed when the target is published — never assigned per submission |
 | **Novelty** | Key is `(target_id, invariant_id, hash of the minimized state delta)`. Rediscovering the same bug yields the same key, so only the first miner is paid |
 | **Known exploits** | Seeded into the ledger before the target opens. Replaying a public attack scores zero |
+| **Impact** | Measured state change, log-scaled against a reference published with the target. Read off the post-state by the harness, never asserted by the miner. Zero impact still scores at a floor — an invariant can break without moving value |
 | **Minimality** | Call count, bounded above and below. Shorter scores slightly higher. An integer, so it cannot be argued with |
 | **Processing order** | Sorted by submission id, so "who was first" does not depend on the order a validator happened to receive things in |
+
+```
+score = severity_weight × impact_factor × minimality_factor
+```
+
+with novelty as a gate: a duplicate finding scores zero regardless of the factors above.
 
 If a validator produces a different result, that is **not a difference of opinion — it is a bug or a defector.** That property is why `monitor.validator_disagreement()` exists.
 

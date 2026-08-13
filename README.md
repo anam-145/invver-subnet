@@ -1,187 +1,454 @@
-# Invariant Subnet
+# InvVer
 
-**A Bittensor subnet for smart contract exploit discovery, where validators score a submission by executing an assertion instead of judging a report.**
+[한국어](./README.ko.md)
 
-Early-stage design by [Anam145](https://sites.google.com/view/iclab-hansung), an operating smart contract security audit firm, with the Intelligence Computing Lab at Hansung University. This repository is the design plus a working core — not a deployed subnet. [What is real and what is not](#status).
+> **Break the invariant. Verify the exploit.**
+
+**InvVer** is a Bittensor subnet for discovering unknown vulnerabilities in EVM smart contracts through **executable proof-of-concept attacks** and **deterministic fork replay**.
+
+Miners do not earn rewards for naming a vulnerability or writing a persuasive report. They submit an attack that runs. Validators replay the same attack under the same fixed EVM conditions and score the resulting invariant violation and state impact.
+
+```text
+Unknown vulnerability
+→ executable PoC
+→ deterministic replay
+→ invariant violation
+→ reward
+```
+
+The name combines **Invariant** and **Verification**.
 
 ---
 
-## Why most security subnets do not work
+## Goal
 
-Security looks like an obvious fit for a subnet right up until you ask how a validator scores a submission.
+**Build a market for the ability to audit contracts whose vulnerabilities are not known in advance.**
 
-If a miner submits a free-form vulnerability report, some validator has to read it and decide whether it is real, novel, and severe. That requires the validator to be at least as capable as the miner — which inverts the trust model a subnet depends on. Everything bolted on from there (reputation, committees, LLM juries) is a patch on a scoring function that was never deterministic.
+Conventional audit benchmarks normally begin with a list of previously confirmed findings. That means someone must discover and verify the answer before the benchmark can score anyone else.
 
-Exploit discovery itself has exactly the asymmetry a subnet wants:
+InvVer changes the scoring question.
 
-| | Cost | Who bears it |
+```text
+“Did the miner identify a vulnerability in the answer set?”
+                         ↓
+“Did the miner produce an execution that broke the invariant?”
+```
+
+An invariant is a safety condition that must remain true. Examples include:
+
+- protocol assets remain greater than or equal to liabilities;
+- total supply does not increase without authorization;
+- an unprivileged account cannot move another user’s assets;
+- a withdrawal cannot make the protocol insolvent;
+- governance state cannot change without the required authority and delay.
+
+InvVer does not require a complete list of every possible vulnerability. A previously unknown finding becomes verifiable when its PoC executes and breaks a declared safety condition.
+
+---
+
+## Why Existing Audit Benchmarks Stop Short
+
+When evaluation depends on a pre-existing answer set, three problems appear together:
+
+1. **Memorization can become cheaper than capability.**
+2. **A real new vulnerability can fall outside the answer set.**
+3. **A report can score without proving exploitability.**
+
+InvVer changes the miner submission from a claim or a tool into executable proof.
+
+| Design pattern | What the miner submits | What is scored |
 |---|---|---|
-| Finding a working exploit | Open-ended search, expensive, creative | **Miner** |
-| Checking one | One EVM execution, milliseconds, deterministic | **Validator** |
+| BitAudit / ReinforcedAI-style auditing | `{"type": "reentrancy", "line": 12}` | Agreement with a known or planted label |
+| Bitsec-style agent benchmarking | Code that searches for vulnerabilities | Agent output compared with confirmed findings |
+| **InvVer** | **An executable smart-contract attack** | **Replayed invariant violation and state impact** |
 
-Hard to produce, trivial to verify. The open question was never *whether* to reward exploit search — it was **what to make the check out of.**
+```text
+Claim  →  Tool  →  Proof
+```
+
+The defining difference is not merely that some code runs. **The smart-contract exploit itself is replayed and used as the scoring evidence.**
 
 ---
 
-## The miner task
+## Design Lineage
 
-Each open target is a contract published together with a **set of machine-checkable invariants** — properties that must always hold, each expressed as one executable Solidity `assert`.
+The following table summarizes the protocol patterns that informed InvVer. It describes the studied designs and historical versions, not the current operational status of any netuid.
 
-> Target: `SimpleBank`
-> `INV-1` (critical) — `assert(bank._mints(account) <= bank.maxMints());`
-> `INV-2` (high) — `assert(token.balanceOf(account) <= bank.maxMints());`
+| Design | Miner output | Scoring oracle | Contribution and remaining gap |
+|---|---|---|---|
+| **BitAudit** | Vulnerability JSON | Public dataset labels | Introduced smart-contract auditing as a subnet task, but a fixed public answer set made memorization economical |
+| **ReinforcedAI** | Vulnerability JSON | Generator-planted labels | Replaced the static problem list with generated contracts, but the generator’s bug vocabulary became the new answer key |
+| **Bitsec** | Reusable audit agent | Previously confirmed findings | Moved the submission from an answer to a tool, but scoring still required known findings and did not use the exploit itself as the oracle |
+| **Trishool** | Adversarial prompt or attack scaffold | Guarded-agent execution interpreted by a judge | Turned attack production into a market, while the success boundary remained a semantic judge and rubric |
+| **Yanez / MIID** | Adversarial identity data | Immediate quality score plus longer-term reputation | Introduced an exploration and reputation perspective, while immediate scoring and downstream security value remained separate signals |
+| **InvVer** | **Executable PoC** | **EVM fork replay + invariant and impact checks** | **Makes the exploit execution itself the evidence used by independent validators** |
 
-**A miner's job: find a transaction sequence that makes one of those assertions fail.**
+Two design movements are visible:
 
-That is the entire task. It is open-ended and creative — how you search is the competitive surface, and we expect divergent approaches:
+```text
+Miner submission:  Answer  →  Tool  →  Attack  →  Executable proof
+Scoring oracle:     Label   →  Known findings  →  Judge / reputation  →  EVM state transition
+```
 
-- RL over transaction sequences, using the invariant set as the reward signal. Unusually, the reward here is already dense and deterministic.
-- LLM-driven candidate generation seeded with the invariant statement, then concretized by a fuzzer.
-- Classical property fuzzing (Echidna / Medusa) with the published invariant compiled straight in as the property.
+InvVer takes the strongest lesson from both lineages:
 
-The subnet does not care which. The check is identical either way.
+> **Marketize the difficult search, but make the verdict reproducible from execution.**
 
-Miners submit a Solidity proof-of-concept. Skeleton: [`subnet/neurons/miner.py`](subnet/neurons/miner.py).
+---
 
-## The validator task
+## Three Recurring Gaps
 
-**A validator runs the assertion. That is all it does.**
+### Gap A — The answer must exist before scoring
+
+In fixed-label smart-contract benchmarks, scoring starts only after somebody has confirmed the findings. Changing where the answer comes from—public data, a generator, or a human audit—does not remove that dependency.
+
+### Gap B — The exploit itself is not the scoring evidence
+
+Bitsec executes the miner’s audit agent, which is an important step beyond static answers. However, executing an auditor and replaying the exploit it claims to have found are different operations.
+
+InvVer makes the exploit itself the object of evaluation.
+
+### Gap C — The final verdict may not be independently reproducible
+
+When the final score depends on a shared judge, a private ranking service, or an opaque reputation calculation, multiple validators can still depend on the same underlying oracle.
+
+InvVer gives every validator the same fork, PoC, invariant, and execution conditions so that each validator can calculate the result independently.
+
+### One execution addresses all three
+
+```text
+Replay the exploit
+   ├─ no complete vulnerability answer set is required
+   ├─ exploitability is demonstrated
+   └─ the verdict can be reproduced independently
+```
+
+> **Previous systems changed how the answer was obtained. InvVer changes what counts as an answer: a reproduced invariant-breaking execution.**
+
+---
+
+## How InvVer Works
+
+```mermaid
+flowchart LR
+    C["Contract + invariant<br/>fixed execution conditions"] --> M["Miner<br/>find attack · write PoC"]
+    M --> V["Validators<br/>replay on the same fork"]
+    V --> E{"Execution result"}
+    E -->|"does not run"| Z["Score = 0"]
+    E -->|"invariant holds"| Z
+    E -->|"invariant breaks"| S["Measure state impact"]
+    S --> W["set_weights"]
+    W --> Y["Subtensor<br/>consensus · rewards"]
+```
+
+### Miner
+
+The miner performs the expensive and creative work:
+
+- analyze the contract;
+- design an attack sequence;
+- write an executable PoC;
+- satisfy the fixed attacker permissions and execution conditions.
+
+### Validator
+
+The validator performs the cheaper verification work:
+
+1. run the PoC;
+2. check whether the invariant breaks;
+3. measure the resulting state impact;
+4. convert the result into a weight.
+
+The validator does not need to rediscover the vulnerability or decide whether a natural-language explanation sounds convincing.
+
+### Subtensor
+
+Subtensor does not execute the exploit. It records validator weights, runs consensus, and settles rewards.
+
+```text
+InvVer     → defines and evaluates the security work
+Subtensor  → aggregates weights and settles incentives
+```
+
+> **Searching for an exploit is creative and expensive. Replaying it is deterministic and comparatively cheap.**
+
+This search–verification asymmetry is the foundation of the subnet.
+
+---
+
+## What Fork Replay Means
+
+A blockchain fork is a local copy of the chain state at a specific block. It contains the contracts, balances, storage, and dependencies that existed at that moment, but executions performed on the fork do not modify the live network.
+
+InvVer fixes the execution inputs:
+
+- chain and block number;
+- contract addresses and state;
+- EVM execution conditions;
+- invariant checks;
+- attacker permissions;
+- PoC and transaction sequence.
+
+```text
+Fixed inputs
+→ same EVM computation
+→ same post-state
+→ same invariant verdict and impact
+```
+
+Validator A, B, and C can therefore replay the same attack independently and compare:
+
+- whether the PoC completed;
+- whether the invariant became false;
+- how contract balances and storage changed;
+- the final state and measured impact.
+
+Fork replay provides a safe, reproducible execution environment without requiring a live-chain attack.
+
+---
+
+## Why This Is Auditable
+
+```mermaid
+flowchart LR
+    I["Fixed inputs<br/>block · contract · invariant · PoC"] --> E["Deterministic EVM execution<br/>same computation"]
+    E --> O["Reproducible output<br/>violation · impact · final state"]
+```
+
+Because each validator derives the result from the same execution, InvVer reduces dependence on:
+
+- **a complete answer list** — the verdict is whether the declared invariant broke;
+- **a round-time judge model** — the EVM state transition is measured rather than rhetorically interpreted;
+- **a central ranking platform** — validators can calculate the raw result independently.
+
+This does not mean that all human judgment disappears. Protocol authors still decide what the invariant means, which permissions the attacker has, and which execution conditions are valid. InvVer moves that semantic judgment **from post-hoc interpretation to rules fixed before competition**.
+
+> **The EVM determines what happened. The predeclared rules determine whether it counts.**
+
+---
+
+## Minimal Example: A Vulnerable Vault
+
+The following example is intentionally simple. Assume that the vault already contains funds deposited by other users.
+
+### Vulnerable contract
 
 ```solidity
-contract InvariantChecker {
-    function checkPerAccountUpperBound(address account) external view {
-        assert(bank._mints(account) <= bank.maxMints());
+contract Vault {
+    mapping(address => uint256) public balance;
+
+    function deposit() external payable {
+        balance[msg.sender] += msg.value;
     }
-    function checkBalanceUpperBound(address account) external view {
-        assert(token.balanceOf(account) <= bank.maxMints());
+
+    function withdraw() external {
+        uint256 amount = balance[msg.sender];
+
+        // Ether is sent before the recorded balance is cleared.
+        (bool ok, ) = msg.sender.call{value: amount}("");
+        require(ok);
+
+        balance[msg.sender] = 0;
     }
 }
 ```
 
-No branching. No heuristic. No model call. No logic that decides whether something *is* a vulnerability — that question was settled when the target's invariant set was published.
+The contract sends Ether before clearing the user’s recorded balance. A receiving contract can call `withdraw()` again while the previous balance is still visible.
 
-The validator forks the chain, replays the miner's proof-of-concept with each published invariant compiled in as an `assert`, and records which ones reverted with `Panic(0x01)`. Those execution results are the only input to scoring.
+### Invariant
 
-**Consequence: two honest validators holding the same results produce bit-identical weights.** A dishonest validator is not expressing a different opinion — it is producing a result every other validator can immediately contradict by running the same bytecode.
-
-Loop: [`subnet/neurons/validator.py`](subnet/neurons/validator.py) · Harness: [`generator/test/InvariantCheck.t.sol`](generator/test/InvariantCheck.t.sol)
-
-## How submissions are scored
-
-Implemented as a pure function with 18 passing tests: [`subnet/invariant_subnet/scoring.py`](subnet/invariant_subnet/scoring.py).
-
-| Factor | Rule | Why it cannot be argued with |
-|---|---|---|
-| **Broke anything** | Binary, from execution | An assert reverted or it did not |
-| **Severity** | Attached to the invariant class, fixed when the target is published | Never assigned per submission, so it is never negotiated after the fact |
-| **Novelty** | Key = `(target, invariant, hash of minimized state delta)` | Two miners who rediscover the same bug produce the same key; only the first is paid |
-| **Known exploits** | Seeded into the ledger before the target opens | Replaying a public attack scores zero |
-| **Minimality** | Call count, bounded both ways | An integer |
-| **Ordering** | Submissions processed sorted by id | "Who was first" does not depend on arrival order |
-
-```bash
-cd subnet && python -m unittest discover tests -v    # no dependencies
+```solidity
+// The vault must always hold enough Ether to cover all recorded balances.
+assert(address(vault).balance >= sumRecordedBalances());
 ```
 
-## Where invariants come from
+The invariant does not identify the vulnerability type. It defines a safety condition that must never be broken.
 
-Two tiers, and the split is the business model.
+### What the miner submits
 
-**Tier 1 — standard classes, generated from source.** Reentrancy, money-flow bounds, access control, gas bounds. Our reproduction of Trace2Inv (ISSTA'24) found this tier alone would have blocked 23 of 27 real historical exploits. Automatable — implemented in [`generator/`](generator).
+```solidity
+contract Attack {
+    Vault public immutable vault;
+    uint256 private calls;
 
-**Tier 2 — protocol-specific economic invariants, written by auditors.** Deliberately not automated. This is what an audit firm already produces, and it is the part a competing subnet cannot bootstrap without one.
+    constructor(Vault _vault) {
+        vault = _vault;
+    }
 
-A subnet with only Tier 1 is a nicer Slither. A subnet with both is a market for the thing that actually causes large losses.
+    function run() external payable {
+        require(msg.value == 1 ether);
 
-Full design — attack surface of the mechanism, target rotation, what is still undecided: **[docs/architecture.md](docs/architecture.md)**.
+        vault.deposit{value: 1 ether}();
+        vault.withdraw();
+    }
+
+    receive() external payable {
+        if (calls++ < 5) {
+            vault.withdraw();
+        }
+    }
+}
+```
+
+The attacker deposits `1 ETH` and triggers six withdrawals before the vault clears the recorded balance.
+
+```text
+1 ETH deposited
+6 ETH withdrawn
+5 ETH net protocol loss
+```
+
+### What the validator does
+
+```solidity
+function testExploit() public {
+    vm.createSelectFork(RPC_URL, FORK_BLOCK);
+
+    Vault vault = Vault(VAULT_ADDRESS);
+    uint256 beforeBalance = address(vault).balance;
+
+    Attack attack = new Attack(vault);
+    attack.run{value: 1 ether}();
+
+    uint256 afterBalance = address(vault).balance;
+    uint256 recordedBalances = sumRecordedBalances(vault);
+
+    // 1. The PoC executed.
+    // 2. The invariant is now false.
+    assertLt(afterBalance, recordedBalances);
+
+    // 3. In this example, net vault loss is the impact value.
+    uint256 netLoss = beforeBalance - afterBalance;
+}
+```
+
+The validator does not decide whether the report “sounds like reentrancy.” It observes the execution.
+
+```text
+1. Does the PoC run?                → No: 0 points
+2. Does the invariant break?        → No: 0 points
+3. How large is the state impact?   → Rank valid PoCs
+```
+
+For this vault, impact is net asset loss. Other contracts can measure unauthorized minting, insolvency, frozen funds, privilege escalation, or governance takeover.
+
+---
+
+## Three Gaps, One Execution
+
+| Recurring gap | InvVer response |
+|---|---|
+| Scoring requires a complete vulnerability list in advance | **The invariant violation is the verdict** |
+| A finding can score without demonstrated exploitability | **The PoC itself runs on the fork** |
+| The final result depends on a central interpreter | **Each validator derives the raw result independently** |
+
+> **Knowing a vulnerability label is not enough. To earn reward, a miner must produce the execution that causes the failure.**
+
+---
+
+## Why Bittensor
+
+InvVer separates open-ended discovery from deterministic verification.
+
+```text
+Miners       compete to discover attacks
+Validators   independently replay attacks
+Subtensor    reaches consensus on weights and distributes rewards
+```
+
+This structure is useful because:
+
+- vulnerability discovery benefits from many independent strategies;
+- miners can use any model, fuzzer, symbolic executor, agent, or human technique;
+- validators do not need to be better auditors than the miners;
+- expensive creative search happens once, while verification can be repeated cheaply;
+- an unknown finding becomes rewardable as soon as its execution is reproduced.
+
+The benchmark directly defines the product:
+
+> **To earn reward, a miner must produce the thing the market wants—an executable exploit proof.**
+
+---
+
+## Where Invariants Come From
+
+Fixing the invariant before competition is what makes the verdict reproducible. It also makes invariant supply the scarce input, so it is worth being explicit about who writes them.
+
+**Standard classes** — reentrancy, money-flow bounds, access control, gas bounds — are generated from source. Our reproduction of Trace2Inv (ISSTA 2024) found that this tier alone would have blocked 23 of 27 real historical exploits. That tier is automatable, and `generator/` implements it for contracts with no transaction history at all.
+
+**Protocol-specific economic invariants** are written by auditors. This is deliberately not automated. It is what an audit business already produces, and it is the part a competing subnet cannot bootstrap without one.
+
+A subnet with only the first tier is a faster static analyzer. A subnet with both is a market for the failures that actually cause large losses.
 
 ---
 
 ## Status
 
-An early-stage submission with a working core. We keep the line between the two visible rather than blurred.
+InvVer is an early-stage design with a working core. We keep the line between the two visible rather than blurred.
 
-| | State |
+| Component | State |
 |---|---|
-| Scoring rule | **Implemented**, 18 passing tests, zero dependencies |
-| Invariant retrieval from source | **Implemented and measured** — ranks `reentrancy` first on a contract with no transaction history, and locates the check-effect-interaction violation automatically |
-| Trace2Inv reproduction | **Reproduced by us** — 23/27 exploits blocked at 3.99% FP; 20/27 at 0.28% FP, matching the authors' expected output |
+| Scoring rule — invariant violation, impact ranking, novelty, minimality | **Implemented**, 25 passing tests, no dependencies — [`subnet/`](subnet) |
+| Invariant generation for contracts with no transaction history | **Implemented and measured** — [`generator/`](generator) |
+| Trace2Inv reproduction | **Reproduced by us** — 23/27 exploits blocked at 3.99% FP, 20/27 at 0.28%, matching the authors' expected output |
+| PoC / invariant harness | Written, **not yet executed** — no Foundry install in the build environment |
 | LLM invariant generation | Implemented, **not yet run** against a billed endpoint |
-| Foundry exploit/assert measurement | Harness written, **not yet executed** |
-| Miner / validator neurons | **Skeletons.** Unimplemented functions raise rather than returning plausible values |
+| Fork replay against live chain state | **Designed, not implemented.** The current harness deploys locally |
+| Miner and validator neurons | **Skeletons.** Unimplemented functions raise rather than returning plausible values |
 | Testnet subnet | **Not started** |
 
-Nothing in this repository reports a number we did not measure. Reasoning and sources: **[docs/evidence.md](docs/evidence.md)**.
+Nothing in this repository reports a number we did not measure. Reasoning and sources: [`docs/evidence.md`](docs/evidence.md).
 
 ---
 
-## Repository map
+## Repository
 
 ```
 subnet/      Python — scoring rule, miner/validator skeletons, network monitoring
-generator/   Node.js — invariant generation from source + the Foundry harness
-web/         A static page walking through the pipeline (runs locally, KO/EN)
+generator/   Node.js — invariant generation from source + the verification harness
+web/         A static walkthrough of the pipeline (runs locally, KO/EN)
 docs/        Architecture and evidence
 ```
 
-## Try it
-
-Both run with no API key, no wallet, no network.
+Both of these run with no API key, no wallet, and no network:
 
 ```bash
-# the scoring rule
-cd subnet && python -m unittest discover tests -v
-
-# invariant retrieval on a contract with zero transaction history
-cd generator && npm install && npm run step1
+cd subnet    && python -m unittest discover tests -v   # the scoring rule
+cd generator && npm install && npm run step1           # invariant retrieval
 ```
 
-```
-check-effect-interaction violation:
-  ! claim(): token.transfer(...)  →  _mints += ...
+The worked example in this README is a minimal vault, chosen for clarity. The contract actually wired into the repository is [DeFiVulnLabs / `SimpleBank`](https://github.com/SunWeb3Sec/DeFiVulnLabs/blob/main/src/test/ERC777-reentrancy.sol) — an ERC777 reentrancy where a per-account cap of 1,000 is bypassed to 1,900. Same shape, real provenance.
 
-reference property ranking:
-  → [score  7] reentrancy/NonReentrantLock
-  → [score  6] reentrancy/CheckEffectInteraction
-  → [score  5] money_flow/PerAccountUpperBound
-  → [score  4] money_flow/AccountingConservation
-  → [score  2] gas_control/GasUpperBound
-    [score  1] access_control/OnlyEOA … and 4 more at 0
-```
+---
 
-Optional walkthrough page: `cd web && python -m http.server 8080` → `localhost:8080/?lang=en`
+## Precise Claim
 
-## The target contract
+InvVer does not claim to be the only system that executes code.
 
-[DeFiVulnLabs / `SimpleBank`](https://github.com/SunWeb3Sec/DeFiVulnLabs/blob/main/src/test/ERC777-reentrancy.sol) — ERC777 reentrancy. Logic unmodified; we removed only the upstream comment naming the bug, so the generator gets no hint.
+- Bitsec executes the audit agent.
+- Trishool executes adversarial prompts against a guarded agent.
+- InvVer executes the **smart-contract exploit itself** and uses the resulting EVM state transition as scoring evidence.
 
-```solidity
-function claim(address account, uint256 amount) public returns (bool) {
-    require(_mints[account] + amount <= maxMintsPerAddress, "Exceeds max mints per address");
+InvVer also does not claim that execution alone defines protocol intent. The invariant, attacker permissions, and execution conditions are fixed before evaluation. Once those rules are fixed, validators calculate the round-time verdict from the replayed execution rather than from a post-hoc interpretation of the report.
 
-    token.transfer(account, amount);   // interaction first
-    _mints[account] += amount;         // effect second   ← CEI violation
+---
 
-    return true;
-}
-```
+## Core Principles
 
-The cap is 1,000 and the attacker asks for 900. The ERC777 hook fires mid-transfer, the attacker reenters `claim`, and `require` reads a `_mints` value that has not been updated yet. Final balance: 1,900 — which is what `INV-1` and `INV-2` above catch.
+1. **No exhaustive vulnerability answer list.**
+2. **No positive score without an executable PoC.**
+3. **The smart-contract exploit itself is replayed.**
+4. **The invariant and attacker conditions are fixed before evaluation.**
+5. **The same fork and transaction sequence produce the same execution result.**
+6. **Validators calculate raw results independently.**
+7. **Impact is measured from observable state change.**
+8. **Live contracts are handled only with explicit authorization and responsible disclosure.**
 
-## Known limitations
+---
 
-1. **The retriever is lexical, not embedding-based.** Deterministic and offline, but it does not generalize to classes absent from the reference corpus.
-2. **The reference corpus is a stand-in** — eleven properties written by hand following Trace2Inv's taxonomy, not an embedding of real audit reports.
-3. **Output clusters in standard categories.** Protocol-specific economic invariants do not come out, because they are not in the corpus. That tier is the auditor's job — the business case, not a gap we are hiding.
-4. **Single-contract demo.** A real subnet needs miners working across many contracts; scaling is open.
-5. **Emission split, reward curve, and target rotation cadence are undecided.** See [docs/architecture.md](docs/architecture.md) §6.
+## Project
 
-## References
+InvVer is developed by **Anam145**, an operating smart contract security audit firm, with the [Intelligence Computing Lab](https://sites.google.com/view/iclab-hansung) at Hansung University.
 
-- Trace2Inv — *Do Smart Contract Invariants Hold?*, ISSTA 2024 (MIT)
-- PropertyGPT — *LLM-driven Formal Verification of Smart Contracts*, NDSS 2025
-- DeFiVulnLabs (MIT)
-
-## License
-
-MIT — see [LICENSE](LICENSE). Vendored references keep their own licenses.
+**Repository:** `invver-subnet`
+**License:** MIT — see [LICENSE](LICENSE). Vendored references keep their own licenses.
