@@ -1,7 +1,5 @@
 # InvVer
 
-[한국어](./README.ko.md)
-
 > **Break the invariant. Verify the exploit.**
 
 **InvVer** is a Bittensor subnet protocol for discovering unknown vulnerabilities in EVM smart contracts through **executable, invariant-breaking proofs of concept** and **deterministic fork replay**.
