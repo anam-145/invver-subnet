@@ -1,7 +1,7 @@
 [project]
-name = "invariant-subnet"
+name = "invver-subnet"
 version = "0.1.0"
-description = "Miner, validator, and monitoring for the Invariant Subnet"
+description = "Miner, validator, and monitoring for the InvVer subnet"
 requires-python = ">=3.10"
 dependencies = []          # the scoring rule is stdlib-only, on purpose
 

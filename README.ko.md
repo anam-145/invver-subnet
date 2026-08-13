@@ -450,5 +450,5 @@ InvVer는 코드를 실행하는 유일한 시스템이라고 주장하지 않�
 
 InvVer는 스마트컨트랙트 보안 감사 회사 **Anam145**가 한성대학교 [지능형컴퓨팅랩](https://sites.google.com/view/iclab-hansung)과 함께 개발합니다.
 
-**저장소:** `invver-subnet`
+**저장소:** https://github.com/ehddnrRb/invver-subnet
 **라이선스:** MIT — [LICENSE](LICENSE) 참조. 인용된 외부 자료는 각자의 라이선스를 따릅니다.

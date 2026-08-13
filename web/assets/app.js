@@ -1,5 +1,5 @@
 /* ============================================================
-   Invariant Subnet — Anam145
+   InvVer — Anam145
    Stage 1 genuinely runs in this page — a browser port of generator/src/retrieve.mjs.
    The Korean and English strings in I18N below are page copy, not comments.
    ============================================================ */

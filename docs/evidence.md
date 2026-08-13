@@ -103,7 +103,7 @@ Implemented, committed, and readable — but not executed. These appear nowhere 
 ## How to check any of this yourself
 
 ```bash
-git clone <this repo> && cd invariant-subnet
+git clone <this repo> && cd invver-subnet
 
 cd generator && npm install && npm run step1     # retrieval, measured above
 cd ../subnet  && python -m unittest discover tests -v   # scoring rule

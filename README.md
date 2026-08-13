@@ -450,5 +450,5 @@ InvVer also does not claim that execution alone defines protocol intent. The inv
 
 InvVer is developed by **Anam145**, an operating smart contract security audit firm, with the [Intelligence Computing Lab](https://sites.google.com/view/iclab-hansung) at Hansung University.
 
-**Repository:** `invver-subnet`
+**Repository:** https://github.com/ehddnrRb/invver-subnet
 **License:** MIT — see [LICENSE](LICENSE). Vendored references keep their own licenses.

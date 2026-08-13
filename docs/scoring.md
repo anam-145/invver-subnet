@@ -4,7 +4,7 @@ A standalone description of what miners and validators actually do, with the
 implemented scoring code inline. Nothing here requires reading the rest of the
 repository.
 
-Repository: `github.com/ehddnrRb/invariant-subnet` · Anam145 · MIT
+Repository: `github.com/ehddnrRb/invver-subnet` · Anam145 · MIT
 
 ---
 
@@ -262,8 +262,8 @@ targets.
 No API key, no wallet, no network, no dependencies:
 
 ```bash
-git clone https://github.com/ehddnrRb/invariant-subnet
-cd invariant-subnet/subnet
+git clone https://github.com/ehddnrRb/invver-subnet
+cd invver-subnet/subnet
 python -m unittest discover tests -v
 ```
 

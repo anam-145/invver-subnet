@@ -51,7 +51,7 @@ No build command. Output directory `web`.
 server {
     listen 80;
     server_name demo.example.com;
-    root /var/www/invariant-subnet;
+    root /var/www/invver;
     index index.html;
 
     location / { try_files $uri $uri/ =404; }
@@ -63,7 +63,7 @@ server {
 
 ```
 demo.example.com {
-    root * /var/www/invariant-subnet
+    root * /var/www/invver
     file_server
 }
 ```
@@ -71,7 +71,7 @@ demo.example.com {
 ### Upload
 
 ```bash
-scp -r index.html assets user@host:/var/www/invariant-subnet/
+scp -r index.html assets user@host:/var/www/invver/
 ```
 
 Create the directory and fix ownership first — `scp` will not create nested directories, and web roots are usually owned by root.
