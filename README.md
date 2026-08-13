@@ -2,7 +2,7 @@
 
 **A Bittensor subnet where validators score exploits by executing an assertion, not by judging a report.**
 
-Live demo → **[TODO: deployed URL]?lang=en** · Built by [Anam145](https://example.com), an operating smart contract security audit firm.
+Live demo → **[TODO: paste the deployed URL here]?lang=en** · Built by **Anam145**, an operating smart contract security audit firm, with the Intelligence Computing Lab at Hansung University.
 
 ---
 
