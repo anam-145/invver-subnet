@@ -9,7 +9,7 @@ generator/forge-out/
 generator/cache/
 generator/broadcast/
 
-# ── Python (subnet/) ─────────────────────────────────────────
+# ── Python (subnet/, pipeline/) ──────────────────────────────
 __pycache__/
 *.py[cod]
 .venv/
@@ -17,6 +17,9 @@ venv/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
+
+# ── pipeline output ──────────────────────────────────────────
+pipeline/targets/
 
 # ── web/ ─────────────────────────────────────────────────────
 web/assets/fonts/
