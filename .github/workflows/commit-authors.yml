@@ -6,6 +6,12 @@ on:
   pull_request:
   push:
     branches: [main, master]
+# The called check declares `pull-requests: read` (for the PR-event path). Without an explicit
+# block here the repo's restrictive default token grants `pull-requests: none`, and a reusable job
+# cannot request more than its caller grants — that mismatch is what failed the workflow at startup.
+permissions:
+  contents: read
+  pull-requests: read
 jobs:
   commit-authors:
-    uses: anam-145/anam145-infra/.github/workflows/verify-commit-authors.yml@bebb4b1cc36bdf19a58ddbe5b6d98a39933c3436
+    uses: anam-145/anam145-infra/.github/workflows/verify-commit-authors.yml@7d0d5e74d5964336958632c7e69f52e9821813d4
