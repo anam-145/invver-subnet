@@ -1,0 +1,11 @@
+name: commit-authors
+# Every commit must attribute to a real GitHub account (a "ghost" is an author email
+# verified on no account). Calls the shared check in anam145-infra. Detection now; a
+# required check once branch protection exists. See anam145-infra/docs/COMMIT-IDENTITY.md
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+jobs:
+  commit-authors:
+    uses: anam-145/anam145-infra/.github/workflows/verify-commit-authors.yml@bebb4b1cc36bdf19a58ddbe5b6d98a39933c3436
