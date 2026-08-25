@@ -84,6 +84,56 @@ automatically — they are not live deployments, so there is nothing to drain.
 The three RPC/feed-dependent checks are the honest gaps. They raise no false
 confidence: they report `unknown`, and the design fails closed.
 
+## FP screening — the gate that stops a farmable invariant
+
+`fp_screen.py` is the reason an automatically extracted invariant is safe to
+publish. An extractor can produce a *wrong* invariant, and a wrong invariant is
+free money: our Trace2Inv reproduction measured the oracle class firing on
+**22.3%** of legitimate transactions. Publish that as-is and a miner never finds
+a bug — they replay ordinary traffic, one in five trips the assertion, they get
+paid. Miners take the cheapest valid path, so one high-FP invariant turns the
+subnet into a machine that pays for normal trades.
+
+The gate reuses Trace2Inv's own false-positive computation as a **filter**, not
+a statistic:
+
+```text
+candidate invariant
+  → replay the target's past benign transactions against it
+  → fires on any (above threshold)? it is a false positive, not a safety
+    property → reject before publication
+  → survivors go into the manifest, marked fp_screened
+```
+
+```python
+from invver_pipeline.fp_screen import BenignTx, CandidateInvariant, screen
+
+report = screen(candidates, benign_corpus, replayer)   # replayer runs the EVM
+report.kept_ids        # ('reentrancy/NonReentrantLock',)  -> publish these
+report.rejected_ids    # ('oracle/PriceDeviationBound',)   -> dropped
+report.fp_screened     # True iff a clean, non-empty set survived
+```
+
+| Property | Rule |
+|---|---|
+| Threshold | `DEFAULT_MAX_FP_RATE = 0.0` — any fire on benign traffic rejects (a published set is a conjunction of low-FP structural checks) |
+| Fail closed | a corpus below `MIN_CORPUS` cannot clear an invariant — absence of traffic is not evidence of safety |
+| Every candidate rejected | `fp_screened` is False — nothing to publish is not "screened-ready" |
+| EVM step | behind a `Replayer` seam; `ForgeReplayer` is an explicit stub (needs forge) that raises rather than faking a pass |
+
+See it block the oracle-farming attack:
+
+```bash
+python examples/fp_demo.py
+#   KEEP   reentrancy/NonReentrantLock   held on all benign traffic
+#   REJECT oracle/PriceDeviationBound    fired on 22/100 benign tx (22.0% > 0.0%)
+#   FP-SCREEN-DEMO-OK
+```
+
+The benign corpus comes from the target's own pre-exploit history — which the
+already-exploited and patched targets the pipeline admits already have on-chain,
+so screening needs no invented traffic.
+
 ## Mutation — fresh targets without an answer key
 
 `mutate.py` perturbs a screened contract. A mutation changes *how* the contract
@@ -151,7 +201,11 @@ invver_pipeline/
     local_repo.py     walk a cloned audit repo, skip tests/mocks/libs
   safety.py           eligibility gates (fails closed on unknown)
   mutate.py           mutation operators + compile gate (stub)
+  fp_screen.py        false-positive screening; ForgeReplayer is a stub
   ingest.py           orchestrator + CLI
+examples/
+  fp_demo.py          the oracle-farming scenario, blocked
 tests/
   test_pipeline.py
+  test_fp_screen.py
 ```

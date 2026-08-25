@@ -21,6 +21,10 @@ venv/
 # ── pipeline output ──────────────────────────────────────────
 pipeline/targets/
 
+# ── unlazy working ledgers ───────────────────────────────────
+GATES.md
+.unlazy/
+
 # ── web/ ─────────────────────────────────────────────────────
 web/assets/fonts/
 
