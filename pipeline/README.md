@@ -202,10 +202,31 @@ invver_pipeline/
   safety.py           eligibility gates (fails closed on unknown)
   mutate.py           mutation operators + compile gate (stub)
   fp_screen.py        false-positive screening; ForgeReplayer is a stub
+  bridge.py           reads the generator's candidates JSON; live node adapter
   ingest.py           orchestrator + CLI
 examples/
   fp_demo.py          the oracle-farming scenario, blocked
+  e2e_demo.py         generator candidates → FP screening, end to end
 tests/
   test_pipeline.py
   test_fp_screen.py
+  test_bridge.py
+  fixtures/           committed candidates.json from a real generator run
+```
+
+## The generator seam
+
+The Node generator ([`../generator`](../generator)) emits candidate invariants
+for a contract as `invver.candidates/1` JSON; `bridge.py` reads them into the
+pipeline and FP screening filters them. The file is the interface — documented
+in [`../docs/candidates-schema.md`](../docs/candidates-schema.md) — so the
+Python side is tested against a committed fixture, and `bridge.invoke_generator`
+runs the generator live over a node subprocess when you want the real thing.
+
+```bash
+python examples/e2e_demo.py
+#   loaded 5 candidate invariants from the generator …
+#   KEEP   reentrancy/NonReentrantLock …
+#   REJECT oracle/PriceDeviationBound   fired on 22/100 benign tx (22.0% > 0.0%)
+#   E2E-DEMO-OK
 ```

@@ -310,11 +310,51 @@ ${JSON.stringify(INVARIANT_SCHEMA, null, 2)}
   return path.relative(process.cwd(), outFile);
 }
 
+/**
+ * Emit the STEP1 candidates as a stable JSON contract for the Python pipeline.
+ * No API key: these are reference-property sketches ranked by static signals,
+ * not the concrete per-contract asserts STEP2 produces. The pipeline reads this
+ * file, screens the candidates, and marks the survivors fp_screened. Schema is
+ * documented in docs/candidates-schema.md.
+ */
+function emitCandidates(target, retrieval, outDir) {
+  const dir = path.resolve(process.cwd(), outDir);
+  fs.mkdirSync(dir, { recursive: true });
+  const outFile = path.join(dir, "candidates.json");
+
+  const doc = {
+    schema: "invver.candidates/1",
+    target,
+    generated_by: "step1-retrieval",
+    note:
+      "Candidates are reference-property sketches ranked by static signals. " +
+      "Concrete per-contract asserts come from stage 2 (LLM, needs an API key).",
+    signals: retrieval.signals,
+    cei_violations: retrieval.ceiViolations,
+    candidates: retrieval.selected.map((p) => ({
+      id: p.id,
+      category: p.category,
+      score: p.score,
+      matched: p.matched,
+      solidity_sketch: p.formal_sketch,
+      statement: p.statement,
+    })),
+  };
+
+  fs.writeFileSync(outFile, JSON.stringify(doc, null, 2));
+  return { outFile, count: doc.candidates.length };
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const step1Only = args.includes("--step1");
   const promptOnly = args.includes("--print-prompt");
-  const target = args.find((a) => !a.startsWith("--")) ?? "src/SimpleBank.sol";
+  const emitCandidatesOnly = args.includes("--emit-candidates");
+  const outIdx = args.indexOf("--out");
+  const candidatesOut = outIdx !== -1 ? args[outIdx + 1] : "out";
+  const target =
+    args.find((a, i) => !a.startsWith("--") && args[i - 1] !== "--out") ??
+    "src/SimpleBank.sol";
 
   const sourcePath = path.resolve(process.cwd(), target);
   if (!fs.existsSync(sourcePath)) {
@@ -331,6 +371,14 @@ async function main() {
 
   if (step1Only) {
     console.log("(--step1: skipping stage 2)");
+    return;
+  }
+
+  if (emitCandidatesOnly) {
+    const { outFile, count } = emitCandidates(target, retrieval, candidatesOut);
+    console.log(
+      `\nCANDIDATES-EMITTED ${count} → ${path.relative(process.cwd(), outFile)}`
+    );
     return;
   }
 

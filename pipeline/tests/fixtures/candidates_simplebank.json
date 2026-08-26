@@ -1,0 +1,88 @@
+{
+  "schema": "invver.candidates/1",
+  "target": "src/SimpleBank.sol",
+  "generated_by": "step1-retrieval",
+  "note": "Candidates are reference-property sketches ranked by static signals. Concrete per-contract asserts come from stage 2 (LLM, needs an API key).",
+  "signals": {
+    "erc777_hook": true,
+    "external_call_before_state_write": true,
+    "no_reentrancy_guard": true,
+    "per_account_cap": true,
+    "value_transfer": true,
+    "tx_origin": false,
+    "owner_check": false,
+    "price_oracle": false,
+    "timestamp_dep": false,
+    "total_supply": false,
+    "payable_receive": true
+  },
+  "cei_violations": [
+    {
+      "fn": "claim",
+      "call": "token.transfer(...)",
+      "write": "_mints += ..."
+    }
+  ],
+  "candidates": [
+    {
+      "id": "reentrancy/NonReentrantLock",
+      "category": "reentrancy",
+      "score": 7,
+      "matched": [
+        "external_call_before_state_write(+3)",
+        "erc777_hook(+2)",
+        "no_reentrancy_guard(+1)",
+        "value_transfer(+1)"
+      ],
+      "solidity_sketch": "invariant reentrancyDepth() == 0 at function entry",
+      "statement": "No externally reachable function may be reentered before its own execution completes. Reentrancy depth must be zero on entry."
+    },
+    {
+      "id": "reentrancy/CheckEffectInteraction",
+      "category": "reentrancy",
+      "score": 6,
+      "matched": [
+        "external_call_before_state_write(+4)",
+        "no_reentrancy_guard(+1)",
+        "value_transfer(+1)"
+      ],
+      "solidity_sketch": "forall f. lastStateWriteIndex(f) < firstExternalCallIndex(f)",
+      "statement": "At the moment a function performs an external call, every state variable that function is responsible for updating must already be updated."
+    },
+    {
+      "id": "money_flow/PerAccountUpperBound",
+      "category": "money_flow",
+      "score": 5,
+      "matched": [
+        "per_account_cap(+3)",
+        "value_transfer(+1)",
+        "external_call_before_state_write(+1)"
+      ],
+      "solidity_sketch": "invariant forall a. accounting[a] <= CAP",
+      "statement": "Cumulative allocation per account may never exceed the declared per-account cap, including after any transaction completes."
+    },
+    {
+      "id": "money_flow/AccountingConservation",
+      "category": "money_flow",
+      "score": 4,
+      "matched": [
+        "value_transfer(+2)",
+        "per_account_cap(+1)",
+        "payable_receive(+1)"
+      ],
+      "solidity_sketch": "invariant sum(accounting) == initialBalance - token.balanceOf(this)",
+      "statement": "The total recorded in the contract's internal ledger must always equal the total value that has actually left the contract."
+    },
+    {
+      "id": "gas_control/GasUpperBound",
+      "category": "gas_control",
+      "score": 2,
+      "matched": [
+        "erc777_hook(+1)",
+        "external_call_before_state_write(+1)"
+      ],
+      "solidity_sketch": "invariant gasStart - gasEnd <= GAS_CAP",
+      "statement": "Gas consumption on the normal-use path stays below a fixed bound."
+    }
+  ]
+}

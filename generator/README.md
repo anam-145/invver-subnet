@@ -63,6 +63,15 @@ reference property ranking:
 
 Zero transaction history, no model call, deterministic — and the vulnerable function is located from structure alone. The top five are passed to stage 2 as in-context examples.
 
+### Stage 1 as a JSON contract for the pipeline
+
+```bash
+node src/generate_invariants.mjs src/SimpleBank.sol --emit-candidates --out out
+# → CANDIDATES-EMITTED 5 → out/candidates.json
+```
+
+Writes the ranked candidates as `invver.candidates/1` JSON — the seam the Python pipeline reads to screen them for false positives. No API key. Schema and the full flow: [`../docs/candidates-schema.md`](../docs/candidates-schema.md).
+
 ## Stage 2 — generation
 
 Two paths. Same result.
