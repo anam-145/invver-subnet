@@ -21,32 +21,41 @@ jobs:
           SLACK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           script: |
+            const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            async function notify(o) {
+              const tg = [`${o.emoji} <b>${esc(o.event)}</b>`];
+              for (const [l, v] of o.fields) tg.push(`<b>${esc(l)}:</b> <code>${esc(v)}</code>`);
+              if (o.warnings && o.warnings.length) { tg.push('<b>Warnings:</b>'); for (const w of o.warnings) tg.push(`• ${esc(w)}`); }
+              tg.push(`<a href="${esc(o.url)}">${esc(o.link)}</a>`);
+              const sl = [`${o.emoji} *${esc(o.event)}*`];
+              for (const [l, v] of o.fields) sl.push(`*${esc(l)}:* \`${esc(v)}\``);
+              if (o.warnings && o.warnings.length) { sl.push('*Warnings:*'); for (const w of o.warnings) sl.push(`• ${esc(w)}`); }
+              sl.push(`<${o.url}|${esc(o.link)}>`);
+              const post = async (u, b) => { try { await fetch(u, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(b)}); } catch (e) { core.info('post: ' + e.message); } };
+              if (process.env.TG_TOKEN && process.env.TG_CHAT)
+                await post(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {chat_id: process.env.TG_CHAT, text: tg.join('\n'), parse_mode: 'HTML', disable_web_page_preview: true});
+              if (process.env.SLACK_URL)
+                await post(process.env.SLACK_URL, {attachments: [{color: o.color, blocks: [{type: 'section', text: {type: 'mrkdwn', text: sl.join('\n')}}]}]});
+            }
             const {owner, repo} = context.repo;
             const run = context.payload.workflow_run;
             const wf = run.name, concl = run.conclusion;
-            const isFail = !['success','skipped','neutral',null].includes(concl);
+            const isFail = !['success', 'skipped', 'neutral', null].includes(concl);
             const deploySuccess = (wf === 'deploy' && concl === 'success');
             let warnings = [];
             try {
               const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {owner, repo, run_id: run.id, per_page: 100});
               for (const j of jobs) {
-                const a = await github.rest.checks.listAnnotations({owner, repo, check_run_id: j.id}).catch(()=>({data:[]}));
+                const a = await github.rest.checks.listAnnotations({owner, repo, check_run_id: j.id}).catch(() => ({data: []}));
                 warnings.push(...a.data.filter(x => x.annotation_level === 'warning').map(x => x.message.split('\n')[0]));
               }
             } catch (e) { core.info('annotations: ' + e.message); }
             warnings = [...new Set(warnings)];
-            if (!isFail && !deploySuccess && warnings.length === 0) return;   // nothing worth saying
-            let icon, label;
-            if (isFail)              { icon = (wf === 'commit-authors') ? '🚨' : '🔴'; label = `${wf} ${concl}`; }
-            else if (deploySuccess)  { icon = '✅'; label = 'deploy succeeded'; }
-            else                     { icon = '⚠️'; label = `${wf} completed with warnings`; }
-            const lines = [`${icon} ${label} — ${owner}/${repo}`,
-                           `branch: ${run.head_branch}  ·  by: ${run.actor && run.actor.login}`];
-            if (warnings.length) lines.push('⚠ ' + warnings.slice(0, 6).join('\n⚠ '));
-            lines.push(run.html_url);
-            const msg = lines.join('\n');
-            const post = async (u, body) => { try { await fetch(u, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body)}); } catch (e) { core.info('post: ' + e.message); } };
-            if (process.env.TG_TOKEN && process.env.TG_CHAT)
-              await post(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {chat_id: process.env.TG_CHAT, text: msg});
-            if (process.env.SLACK_URL) await post(process.env.SLACK_URL, {text: msg});
-            core.info(msg);
+            if (!isFail && !deploySuccess && warnings.length === 0) return;
+            let emoji, color, event;
+            if (isFail)                              { emoji = (wf === 'commit-authors') ? '🚨' : '🔴'; color = '#e01e5a'; event = `${wf} ${concl}`; }
+            else if (deploySuccess && warnings.length) { emoji = '⚠️'; color = '#ecb22e'; event = 'deploy succeeded (with warnings)'; }
+            else if (deploySuccess)                  { emoji = '✅'; color = '#2eb886'; event = 'deploy succeeded'; }
+            else                                     { emoji = '⚠️'; color = '#ecb22e'; event = `${wf} completed with warnings`; }
+            const fields = [['Repo', `${owner}/${repo}`], ['Branch', run.head_branch], ['By', run.actor && run.actor.login]];
+            await notify({emoji, color, event, fields, warnings, url: run.html_url, link: 'open run'});

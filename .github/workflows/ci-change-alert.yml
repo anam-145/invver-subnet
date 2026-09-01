@@ -23,30 +23,39 @@ jobs:
           SLACK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           script: |
+            const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            async function notify(o) {
+              const tg = [`${o.emoji} <b>${esc(o.event)}</b>`];
+              for (const [l, v] of o.fields) tg.push(`<b>${esc(l)}:</b> <code>${esc(v)}</code>`);
+              if (o.warnings && o.warnings.length) { tg.push('<b>Warnings:</b>'); for (const w of o.warnings) tg.push(`• ${esc(w)}`); }
+              tg.push(`<a href="${esc(o.url)}">${esc(o.link)}</a>`);
+              const sl = [`${o.emoji} *${esc(o.event)}*`];
+              for (const [l, v] of o.fields) sl.push(`*${esc(l)}:* \`${esc(v)}\``);
+              if (o.warnings && o.warnings.length) { sl.push('*Warnings:*'); for (const w of o.warnings) sl.push(`• ${esc(w)}`); }
+              sl.push(`<${o.url}|${esc(o.link)}>`);
+              const post = async (u, b) => { try { await fetch(u, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(b)}); } catch (e) { core.info('post: ' + e.message); } };
+              if (process.env.TG_TOKEN && process.env.TG_CHAT)
+                await post(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {chat_id: process.env.TG_CHAT, text: tg.join('\n'), parse_mode: 'HTML', disable_web_page_preview: true});
+              if (process.env.SLACK_URL)
+                await post(process.env.SLACK_URL, {attachments: [{color: o.color, blocks: [{type: 'section', text: {type: 'mrkdwn', text: sl.join('\n')}}]}]});
+            }
             const {owner, repo} = context.repo;
-            let head, who, url, files = [];
             if (context.eventName === 'pull_request_target') {
               const pr = context.payload.pull_request;
-              who = pr.user.login; url = pr.html_url;
-              head = `⚠️ CI-file change PROPOSED — ${owner}/${repo} PR #${pr.number}`;
+              let files = [];
               try {
                 const fs = await github.paginate(github.rest.pulls.listFiles, {owner, repo, pull_number: pr.number, per_page: 100});
-                files = fs.filter(f => f.filename.startsWith('.github/workflows/')).map(f => `${f.status}: ${f.filename}`);
-              } catch (e) { core.info('listFiles failed: ' + e.message); }
+                files = fs.filter(f => f.filename.startsWith('.github/workflows/')).map(f => `${f.status} ${f.filename}`);
+              } catch (e) { core.info('listFiles: ' + e.message); }
+              const fields = [['Repo', `${owner}/${repo}`], ['PR', `#${pr.number}`], ['By', pr.user.login]];
+              if (files.length) fields.push([files.length > 1 ? 'Files' : 'File', files.join(', ')]);
+              await notify({emoji: '⚠️', color: '#ecb22e', event: 'CI-file change PROPOSED', fields, url: pr.html_url, link: `open PR #${pr.number}`});
             } else {
-              who = context.actor;
               const branch = context.ref.replace('refs/heads/', '');
-              url = `https://github.com/${owner}/${repo}/commit/${context.sha}`;
-              head = `🚨 CI-file change LANDED on ${branch} — ${owner}/${repo}`;
               const set = new Set();
-              (context.payload.commits || []).forEach(c =>
-                [...(c.added||[]), ...(c.modified||[]), ...(c.removed||[])]
-                  .filter(f => f.startsWith('.github/workflows/')).forEach(f => set.add(f)));
-              files = [...set];
+              (context.payload.commits || []).forEach(c => [...(c.added || []), ...(c.modified || []), ...(c.removed || [])].filter(f => f.startsWith('.github/workflows/')).forEach(f => set.add(f)));
+              const files = [...set];
+              const fields = [['Repo', `${owner}/${repo}`], ['Branch', branch], ['By', context.actor]];
+              if (files.length) fields.push([files.length > 1 ? 'Files' : 'File', files.join(', ')]);
+              await notify({emoji: '🚨', color: '#e01e5a', event: 'CI-file change LANDED', fields, url: `https://github.com/${owner}/${repo}/commit/${context.sha}`, link: 'open commit'});
             }
-            const msg = [head, `by: ${who}`, files.length ? files.join('\n') : '(workflow files)', url].join('\n');
-            const post = async (u, body) => { try { await fetch(u, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body)}); } catch (e) { core.info('post failed: '+e.message); } };
-            if (process.env.TG_TOKEN && process.env.TG_CHAT)
-              await post(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {chat_id: process.env.TG_CHAT, text: msg});
-            if (process.env.SLACK_URL) await post(process.env.SLACK_URL, {text: msg});
-            core.info(msg);
