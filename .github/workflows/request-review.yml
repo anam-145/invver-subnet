@@ -1,7 +1,7 @@
 name: request-review
-# Requests the owning CELL TEAM as reviewer on every PR, so all members are set + emailed.
-# Needs org secret REVIEW_REQUEST_TOKEN — a token that can resolve+request an org team
-# (fine-grained: Members:read + Pull requests:write, or classic read:org + repo). No-op until it's set.
+# Requests each CELL MEMBER individually (minus the author) so everyone gets the reliable
+# per-person review email. Reads the cell from CODEOWNERS, resolves members via the org token.
+# Needs org secret REVIEW_REQUEST_TOKEN (repo + read:org). No-op until it's set.
 on:
   pull_request_target:
     types: [opened, ready_for_review, reopened]
@@ -19,16 +19,22 @@ jobs:
           script: |
             if (!process.env.RT) { core.info('REVIEW_REQUEST_TOKEN not set — no-op'); return; }
             const {owner, repo} = context.repo;
+            const author = context.payload.pull_request.user.login;
+            const pull_number = context.payload.pull_request.number;
             let team;
             try {
               const {data} = await github.rest.repos.getContent({owner, repo, path: '.github/CODEOWNERS'});
-              const co = Buffer.from(data.content, 'base64').toString();
-              const m = co.match(/^\s*\*\s+@anam-145\/([\w-]+)/m);
+              const m = Buffer.from(data.content,'base64').toString().match(/^\s*\*\s+@anam-145\/([\w-]+)/m);
               team = m && m[1];
-            } catch (e) { core.info('no CODEOWNERS: ' + e.message); return; }
-            if (!team) { core.info('no cell owner in CODEOWNERS'); return; }
+            } catch (e) { core.info('no CODEOWNERS: '+e.message); return; }
+            if (!team) { core.info('no cell owner'); return; }
+            let reviewers = [];
             try {
-              await github.rest.pulls.requestReviewers({owner, repo,
-                pull_number: context.payload.pull_request.number, team_reviewers: [team]});
-              core.info('requested team @' + owner + '/' + team + ' — all members notified');
-            } catch (e) { core.info('request failed: ' + e.message); }
+              const members = await github.paginate(github.rest.teams.listMembersInOrg, {org: owner, team_slug: team, per_page: 100});
+              reviewers = members.map(m => m.login).filter(l => l !== author);
+            } catch (e) { core.info('list members failed: '+e.message); return; }
+            if (!reviewers.length) { core.info('no eligible reviewers'); return; }
+            try {
+              await github.rest.pulls.requestReviewers({owner, repo, pull_number, reviewers});
+              core.info('requested: '+reviewers.join(', '));
+            } catch (e) { core.info('request failed: '+e.message); }
