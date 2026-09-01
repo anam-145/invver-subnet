@@ -1,18 +1,38 @@
-# PR auto-labels by the branch's TYPE prefix — matches the commit/branch convention (§9.1b/§9.1c),
-# so the label reflects intent (feat/hero-bluer -> feat), not an incidental file. actions/labeler v5.
+# PR auto-labels — additive. TYPE from the branch prefix (matches §9.1b) AND AREA from files changed,
+# so feat/hero-bluer -> feat, and if it also touches package.json it gets +dependencies. Both apply.
+
+# --- type, from the branch prefix ---
 feat:
   - head-branch: ['^feat/', '^feature/']
 fix:
   - head-branch: ['^fix/', '^hotfix/', '^bugfix/']
-docs:
-  - head-branch: ['^docs/']
 chore:
   - head-branch: ['^chore/']
 refactor:
   - head-branch: ['^refactor/']
-ci:
-  - head-branch: ['^ci/']
 perf:
   - head-branch: ['^perf/']
+# these three are both a type (branch) and an area (files) — matched either way
+docs:
+  - head-branch: ['^docs/']
+  - changed-files:
+      - any-glob-to-any-file: ['**/*.md', 'docs/**']
+ci:
+  - head-branch: ['^ci/']
+  - changed-files:
+      - any-glob-to-any-file: ['.github/**']
 test:
   - head-branch: ['^test/']
+  - changed-files:
+      - any-glob-to-any-file: ['**/*.test.*', '**/*.spec.*', '**/test/**', '**/tests/**', '**/__tests__/**']
+
+# --- area only, from files changed ---
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file: ['**/package.json', '**/*.lock', '**/requirements*.txt', '**/go.mod', '**/Cargo.toml', '**/Gemfile*']
+docker:
+  - changed-files:
+      - any-glob-to-any-file: ['**/Dockerfile*', '**/docker-compose*.y*ml']
+config:
+  - changed-files:
+      - any-glob-to-any-file: ['**/*.env*', '**/*.config.*']
