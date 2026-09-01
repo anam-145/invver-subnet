@@ -1,0 +1,19 @@
+# PR auto-labels by files changed — general and repo-agnostic (actions/labeler v5).
+docs:
+  - changed-files:
+      - any-glob-to-any-file: ['**/*.md', 'docs/**']
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ['.github/**']
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file: ['**/package.json', '**/*.lock', '**/requirements*.txt', '**/go.mod', '**/Cargo.toml', '**/Gemfile*']
+docker:
+  - changed-files:
+      - any-glob-to-any-file: ['**/Dockerfile*', '**/docker-compose*.y*ml']
+config:
+  - changed-files:
+      - any-glob-to-any-file: ['**/*.env*', '**/*.config.*']
+tests:
+  - changed-files:
+      - any-glob-to-any-file: ['**/*.test.*', '**/*.spec.*', '**/test/**', '**/tests/**', '**/__tests__/**']
