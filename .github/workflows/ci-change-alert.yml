@@ -1,0 +1,52 @@
+name: ci-change-alert
+# Alerts (Telegram + Slack) when a workflow file is changed, or a change is proposed in a PR.
+# Runs on a HOSTED runner only — never self-hosted — so it cannot touch the deploy hosts.
+# pull_request_target reads only PR *metadata* (never checks out or runs PR code): safe by design.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths: ['.github/workflows/**']
+  push:
+    branches: [main, master]
+    paths: ['.github/workflows/**']
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            let head, who, url, files = [];
+            if (context.eventName === 'pull_request_target') {
+              const pr = context.payload.pull_request;
+              who = pr.user.login; url = pr.html_url;
+              head = `⚠️ CI-file change PROPOSED — ${owner}/${repo} PR #${pr.number}`;
+              try {
+                const fs = await github.paginate(github.rest.pulls.listFiles, {owner, repo, pull_number: pr.number, per_page: 100});
+                files = fs.filter(f => f.filename.startsWith('.github/workflows/')).map(f => `${f.status}: ${f.filename}`);
+              } catch (e) { core.info('listFiles failed: ' + e.message); }
+            } else {
+              who = context.actor;
+              const branch = context.ref.replace('refs/heads/', '');
+              url = `https://github.com/${owner}/${repo}/commit/${context.sha}`;
+              head = `🚨 CI-file change LANDED on ${branch} — ${owner}/${repo}`;
+              const set = new Set();
+              (context.payload.commits || []).forEach(c =>
+                [...(c.added||[]), ...(c.modified||[]), ...(c.removed||[])]
+                  .filter(f => f.startsWith('.github/workflows/')).forEach(f => set.add(f)));
+              files = [...set];
+            }
+            const msg = [head, `by: ${who}`, files.length ? files.join('\n') : '(workflow files)', url].join('\n');
+            const post = async (u, body) => { try { await fetch(u, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body)}); } catch (e) { core.info('post failed: '+e.message); } };
+            if (process.env.TG_TOKEN && process.env.TG_CHAT)
+              await post(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {chat_id: process.env.TG_CHAT, text: msg});
+            if (process.env.SLACK_URL) await post(process.env.SLACK_URL, {text: msg});
+            core.info(msg);
