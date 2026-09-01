@@ -1,0 +1,52 @@
+name: ci-notify
+# Posts CI/CD outcomes to Telegram + Slack: failures (deploy/release/commit-authors),
+# deploy successes, and warning annotations. Hosted runner only (never self-hosted).
+# workflow_run runs the default-branch version (tamper-proof) after a watched run finishes.
+on:
+  workflow_run:
+    workflows: [deploy, release, commit-authors]
+    types: [completed]
+permissions:
+  contents: read
+  actions: read
+  checks: read
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const run = context.payload.workflow_run;
+            const wf = run.name, concl = run.conclusion;
+            const isFail = !['success','skipped','neutral',null].includes(concl);
+            const deploySuccess = (wf === 'deploy' && concl === 'success');
+            let warnings = [];
+            try {
+              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {owner, repo, run_id: run.id, per_page: 100});
+              for (const j of jobs) {
+                const a = await github.rest.checks.listAnnotations({owner, repo, check_run_id: j.id}).catch(()=>({data:[]}));
+                warnings.push(...a.data.filter(x => x.annotation_level === 'warning').map(x => x.message.split('\n')[0]));
+              }
+            } catch (e) { core.info('annotations: ' + e.message); }
+            warnings = [...new Set(warnings)];
+            if (!isFail && !deploySuccess && warnings.length === 0) return;   // nothing worth saying
+            let icon, label;
+            if (isFail)              { icon = (wf === 'commit-authors') ? '🚨' : '🔴'; label = `${wf} ${concl}`; }
+            else if (deploySuccess)  { icon = '✅'; label = 'deploy succeeded'; }
+            else                     { icon = '⚠️'; label = `${wf} completed with warnings`; }
+            const lines = [`${icon} ${label} — ${owner}/${repo}`,
+                           `branch: ${run.head_branch}  ·  by: ${run.actor && run.actor.login}`];
+            if (warnings.length) lines.push('⚠ ' + warnings.slice(0, 6).join('\n⚠ '));
+            lines.push(run.html_url);
+            const msg = lines.join('\n');
+            const post = async (u, body) => { try { await fetch(u, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body)}); } catch (e) { core.info('post: ' + e.message); } };
+            if (process.env.TG_TOKEN && process.env.TG_CHAT)
+              await post(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {chat_id: process.env.TG_CHAT, text: msg});
+            if (process.env.SLACK_URL) await post(process.env.SLACK_URL, {text: msg});
+            core.info(msg);
