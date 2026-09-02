@@ -1,6 +1,6 @@
 name: ci-notify
-# Posts CI/CD outcomes to Telegram + Slack: failures (deploy/release/commit-authors),
-# deploy successes, and warning annotations. Hosted runner only (never self-hosted).
+# Posts CI/CD outcomes to Telegram + Slack: failures (deploy/release/commit-authors/secret-scan),
+# deploy successes, and deploy warning annotations. Hosted runner only (never self-hosted).
 # workflow_run runs the default-branch version (tamper-proof) after a watched run finishes.
 on:
   workflow_run:
@@ -14,7 +14,7 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v8
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -42,20 +42,24 @@ jobs:
             const wf = run.name, concl = run.conclusion;
             const isFail = !['success', 'skipped', 'neutral', null].includes(concl);
             const deploySuccess = (wf === 'deploy' && concl === 'success');
+            // Warnings are only meaningful on deploy runs (smoke-urls coverage). Everywhere else the only
+            // warnings are platform noise (e.g. Node.js deprecation), so don't fetch or alert them.
             let warnings = [];
-            try {
-              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {owner, repo, run_id: run.id, per_page: 100});
-              for (const j of jobs) {
-                const a = await github.rest.checks.listAnnotations({owner, repo, check_run_id: j.id}).catch(() => ({data: []}));
-                warnings.push(...a.data.filter(x => x.annotation_level === 'warning').map(x => x.message.split('\n')[0]));
-              }
-            } catch (e) { core.info('annotations: ' + e.message); }
-            warnings = [...new Set(warnings)];
+            if (wf === 'deploy') {
+              try {
+                const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {owner, repo, run_id: run.id, per_page: 100});
+                for (const j of jobs) {
+                  const a = await github.rest.checks.listAnnotations({owner, repo, check_run_id: j.id}).catch(() => ({data: []}));
+                  warnings.push(...a.data.filter(x => x.annotation_level === 'warning').map(x => x.message.split('\n')[0]));
+                }
+              } catch (e) { core.info('annotations: ' + e.message); }
+              warnings = [...new Set(warnings)].filter(w => !/deprecat|node\.?js \d|set-output|save-state/i.test(w));
+            }
             if (!isFail && !deploySuccess && warnings.length === 0) return;
             let emoji, color, event;
-            if (isFail)                              { emoji = (wf === 'commit-authors' || wf === 'secret-scan') ? '🚨' : '🔴'; color = '#e01e5a'; event = `${wf} ${concl}`; }
+            if (isFail)                                { emoji = (wf === 'commit-authors' || wf === 'secret-scan') ? '🚨' : '🔴'; color = '#e01e5a'; event = `${wf} ${concl}`; }
             else if (deploySuccess && warnings.length) { emoji = '⚠️'; color = '#ecb22e'; event = 'deploy succeeded (with warnings)'; }
-            else if (deploySuccess)                  { emoji = '✅'; color = '#2eb886'; event = 'deploy succeeded'; }
-            else                                     { emoji = '⚠️'; color = '#ecb22e'; event = `${wf} completed with warnings`; }
+            else if (deploySuccess)                    { emoji = '✅'; color = '#2eb886'; event = 'deploy succeeded'; }
+            else                                       { emoji = '⚠️'; color = '#ecb22e'; event = `${wf} completed with warnings`; }
             const fields = [['Repo', `${owner}/${repo}`], ['Branch', run.head_branch], ['By', run.actor && run.actor.login]];
             await notify({emoji, color, event, fields, warnings, url: run.html_url, link: 'open run'});
