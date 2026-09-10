@@ -25,14 +25,17 @@ jobs:
           script: |
             const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             async function notify(o) {
+              const ts = new Date().toLocaleString('sv-SE', {timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}) + ' KST';
               const tg = [`${o.emoji} <b>${esc(o.event)}</b>`];
               for (const [l, v] of o.fields) tg.push(`<b>${esc(l)}:</b> <code>${esc(v)}</code>`);
               if (o.warnings && o.warnings.length) { tg.push('<b>Warnings:</b>'); for (const w of o.warnings) tg.push(`• ${esc(w)}`); }
               tg.push(`<a href="${esc(o.url)}">${esc(o.link)}</a>`);
+              tg.push(`<i>${esc(ts)}</i>`);
               const sl = [`${o.emoji} *${esc(o.event)}*`];
               for (const [l, v] of o.fields) sl.push(`*${esc(l)}:* \`${esc(v)}\``);
               if (o.warnings && o.warnings.length) { sl.push('*Warnings:*'); for (const w of o.warnings) sl.push(`• ${esc(w)}`); }
               sl.push(`<${o.url}|${esc(o.link)}>`);
+              sl.push(`_${esc(ts)}_`);
               const post = async (u, b) => { try { await fetch(u, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(b)}); } catch (e) { core.info('post: ' + e.message); } };
               if (process.env.TG_TOKEN && process.env.TG_CHAT)
                 await post(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {chat_id: process.env.TG_CHAT, text: tg.join('\n'), parse_mode: 'HTML', disable_web_page_preview: true});
