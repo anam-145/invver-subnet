@@ -2,6 +2,8 @@ name: ci-notify
 # Posts CI/CD outcomes to Telegram + Slack: failures (deploy/release/commit-authors/secret-scan),
 # deploy successes, and deploy warning annotations. Hosted runner only (never self-hosted).
 # workflow_run runs the default-branch version (tamper-proof) after a watched run finishes.
+# This caller only assembles the payload; the message FORMAT lives in the shared ci-alert action
+# (anam145-infra/.github/actions/ci-alert), pinned @main per CONVENTIONS §3.4-0b.
 on:
   workflow_run:
     workflows: [deploy, release, commit-authors, secret-scan]
@@ -15,31 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v8
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SLACK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        id: build
         with:
           script: |
-            const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            async function notify(o) {
-              const ts = new Date().toLocaleString('sv-SE', {timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}) + ' KST';
-              const tg = [`${o.emoji} <b>${esc(o.event)}</b>`];
-              for (const [l, v] of o.fields) tg.push(`<b>${esc(l)}:</b> <code>${esc(v)}</code>`);
-              if (o.warnings && o.warnings.length) { tg.push('<b>Warnings:</b>'); for (const w of o.warnings) tg.push(`• ${esc(w)}`); }
-              tg.push(`<a href="${esc(o.url)}">${esc(o.link)}</a>`);
-              tg.push(`<i>${esc(ts)}</i>`);
-              const sl = [`${o.emoji} *${esc(o.event)}*`];
-              for (const [l, v] of o.fields) sl.push(`*${esc(l)}:* \`${esc(v)}\``);
-              if (o.warnings && o.warnings.length) { sl.push('*Warnings:*'); for (const w of o.warnings) sl.push(`• ${esc(w)}`); }
-              sl.push(`<${o.url}|${esc(o.link)}>`);
-              sl.push(`_${esc(ts)}_`);
-              const post = async (u, b) => { try { await fetch(u, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(b)}); } catch (e) { core.info('post: ' + e.message); } };
-              if (process.env.TG_TOKEN && process.env.TG_CHAT)
-                await post(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {chat_id: process.env.TG_CHAT, text: tg.join('\n'), parse_mode: 'HTML', disable_web_page_preview: true});
-              if (process.env.SLACK_URL)
-                await post(process.env.SLACK_URL, {attachments: [{color: o.color, blocks: [{type: 'section', text: {type: 'mrkdwn', text: sl.join('\n')}}]}]});
-            }
             const {owner, repo} = context.repo;
             const run = context.payload.workflow_run;
             const wf = run.name, concl = run.conclusion;
@@ -58,11 +38,18 @@ jobs:
               } catch (e) { core.info('annotations: ' + e.message); }
               warnings = [...new Set(warnings)].filter(w => !/deprecat|node\.?js \d|set-output|save-state/i.test(w));
             }
-            if (!isFail && !deploySuccess && warnings.length === 0) return;
+            if (!isFail && !deploySuccess && warnings.length === 0) { core.setOutput('payload', ''); return; }
             let emoji, color, event;
             if (isFail)                                { emoji = (wf === 'commit-authors' || wf === 'secret-scan') ? '🚨' : '🔴'; color = '#e01e5a'; event = `${wf} ${concl}`; }
             else if (deploySuccess && warnings.length) { emoji = '⚠️'; color = '#ecb22e'; event = 'deploy succeeded (with warnings)'; }
             else if (deploySuccess)                    { emoji = '✅'; color = '#2eb886'; event = 'deploy succeeded'; }
             else                                       { emoji = '⚠️'; color = '#ecb22e'; event = `${wf} completed with warnings`; }
             const fields = [['Repo', `${owner}/${repo}`], ['Branch', run.head_branch], ['By', run.actor && run.actor.login]];
-            await notify({emoji, color, event, fields, warnings, url: run.html_url, link: 'open run'});
+            core.setOutput('payload', JSON.stringify({emoji, color, event, fields, warnings, url: run.html_url, link: 'open run'}));
+      - if: steps.build.outputs.payload != ''
+        uses: anam-145/anam145-infra/.github/actions/ci-alert@main
+        with:
+          payload: ${{ steps.build.outputs.payload }}
+          tg_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          tg_chat: ${{ secrets.TELEGRAM_CHAT_ID }}
+          slack_url: ${{ secrets.SLACK_WEBHOOK_URL }}
