@@ -41,7 +41,15 @@ jobs:
               const files = [...set];
               const fields = [['Repo', `${owner}/${repo}`], ['Branch', branch], ['By', context.actor]];
               if (files.length) fields.push([files.length > 1 ? 'Files' : 'File', files.join(', ')]);
-              o = {emoji: '🚨', color: '#e01e5a', event: 'CI-file change LANDED', fields, url: `https://github.com/${owner}/${repo}/commit/${context.sha}`, link: 'open commit'};
+              const commitUrl = `https://github.com/${owner}/${repo}/commit/${context.sha}`;
+              // A push that CREATES the branch/repo (a new repo from this template) carries the whole set of
+              // workflow files unedited — not the workflow EDIT this alert exists to catch. Flag it distinctly,
+              // and name the onboarding that is not done yet: main is unprotected until a cell ruleset covers it.
+              o = context.payload.created === true
+                ? {emoji: '🆕', color: '#ecb22e', event: 'New repo/branch — CI files from template (not an edit)', fields,
+                   warnings: ['main is unprotected until onboarding is finished:', 'add it to its cell ruleset — docs/rulesets/cell-*.ruleset.json', 'fill .github/CODEOWNERS with the cell team', 'list it in docs/TEAMS.md'],
+                   url: commitUrl, link: 'open commit'}
+                : {emoji: '🚨', color: '#e01e5a', event: 'CI-file change LANDED', fields, url: commitUrl, link: 'open commit'};
             }
             core.setOutput('payload', JSON.stringify(o));
       - if: steps.build.outputs.payload != ''
