@@ -1,7 +1,7 @@
 name: request-review
 # Requests each CELL MEMBER individually (minus the author) so everyone gets the reliable
 # per-person review email. Reads the cell from CODEOWNERS, resolves members via the org token.
-# Needs org secret REVIEW_REQUEST_TOKEN (repo + read:org). No-op until it's set.
+# Needs org secret ORG_REVIEW_TOKEN (fine-grained: Contents:read, Pull requests:write, Members:read). No-op until it's set.
 on:
   pull_request_target:
     types: [opened, ready_for_review, reopened]
@@ -13,11 +13,11 @@ jobs:
     steps:
       - uses: actions/github-script@v8
         env:
-          RT: ${{ secrets.REVIEW_REQUEST_TOKEN }}
+          RT: ${{ secrets.ORG_REVIEW_TOKEN }}
         with:
-          github-token: ${{ secrets.REVIEW_REQUEST_TOKEN || github.token }}
+          github-token: ${{ secrets.ORG_REVIEW_TOKEN || github.token }}
           script: |
-            if (!process.env.RT) { core.info('REVIEW_REQUEST_TOKEN not set — no-op'); return; }
+            if (!process.env.RT) { core.info('ORG_REVIEW_TOKEN not set — no-op'); return; }
             const {owner, repo} = context.repo;
             const author = context.payload.pull_request.user.login;
             const pull_number = context.payload.pull_request.number;
