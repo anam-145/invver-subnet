@@ -1,7 +1,7 @@
 name: commit-authors
 # Every commit must attribute to a real GitHub account (a "ghost" is an author email
-# verified on no account). Calls the shared check in anam145-infra. Detection now; a
-# required check once branch protection exists. See anam145-infra/docs/COMMIT-IDENTITY.md
+# verified on no account). Calls the shared check in anam145-infra. A required status check on
+# cell repos (enforced via the cell ruleset; paid Team plan). See anam145-infra/docs/COMMIT-IDENTITY.md
 on:
   pull_request:
   push:
