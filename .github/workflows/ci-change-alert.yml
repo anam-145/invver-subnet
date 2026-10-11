@@ -1,9 +1,6 @@
 name: ci-change-alert
-# Alerts (Telegram + Slack) when a workflow file is changed, or a change is proposed in a PR.
-# Runs on a HOSTED runner only — never self-hosted — so it cannot touch the deploy hosts.
-# pull_request_target reads only PR *metadata* (never checks out or runs PR code): safe by design.
-# This caller only assembles the payload; the message FORMAT lives in the shared ci-alert action
-# (anam145-infra/.github/actions/ci-alert), pinned @main per CONVENTIONS §3.4-0b — one file to restyle.
+# Thin caller — the logic lives in anam145-infra/.github/workflows/run-ci-change-alert.yml.
+# Edit the reusable (one place for every repo), not this file. See anam145-infra docs/WORKFLOW.md.
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
@@ -16,48 +13,5 @@ permissions:
   pull-requests: read
 jobs:
   alert:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/github-script@v8
-        id: build
-        with:
-          script: |
-            const {owner, repo} = context.repo;
-            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
-            let o;
-            if (context.eventName === 'pull_request_target') {
-              const pr = context.payload.pull_request;
-              let files = [];
-              try {
-                const fs = await github.paginate(github.rest.pulls.listFiles, {owner, repo, pull_number: pr.number, per_page: 100});
-                files = fs.filter(f => f.filename.startsWith('.github/workflows/')).map(f => `${f.status} ${f.filename}`);
-              } catch (e) { core.info('listFiles: ' + e.message); }
-              const fields = [['Repo', `${owner}/${repo}`], ['PR', `#${pr.number}`], ['By', pr.user.login]];
-              if (files.length) fields.push([files.length > 1 ? 'Files' : 'File', files.join(', ')]);
-              o = {emoji: '⚠️', color: '#ecb22e', event: 'CI-file change PROPOSED', fields, url: pr.html_url, link: `open PR #${pr.number}`, links: [{url: runUrl, label: 'open run log'}]};
-            } else {
-              const branch = context.ref.replace('refs/heads/', '');
-              const set = new Set();
-              (context.payload.commits || []).forEach(c => [...(c.added || []), ...(c.modified || []), ...(c.removed || [])].filter(f => f.startsWith('.github/workflows/')).forEach(f => set.add(f)));
-              const files = [...set];
-              const fields = [['Repo', `${owner}/${repo}`], ['Branch', branch], ['By', context.actor]];
-              if (files.length) fields.push([files.length > 1 ? 'Files' : 'File', files.join(', ')]);
-              const commitUrl = `https://github.com/${owner}/${repo}/commit/${context.sha}`;
-              // A push that CREATES the branch/repo (a new repo from this template) carries the whole set of
-              // workflow files unedited — not the workflow EDIT this alert exists to catch. Flag it distinctly,
-              // and name the onboarding that is not done yet: main is unprotected until a cell ruleset covers it.
-              o = context.payload.created === true
-                ? {emoji: '🆕', color: '#ecb22e', event: 'New repo needs onboarding',
-                   items: [{text: `${owner}/${repo}`, url: `https://github.com/${owner}/${repo}`, note: `by ${context.actor}`}],
-                   warnings: ['not onboarded yet: no cell team, main unprotected', 'the daily ruleset-coverage-audit will keep flagging it until the cell team and ruleset are set'],
-                   url: commitUrl, link: 'open the first commit', links: [{url: runUrl, label: 'open run log'}]}
-                : {emoji: '🚨', color: '#e01e5a', event: 'CI-file change LANDED', fields, url: commitUrl, link: 'open commit', links: [{url: runUrl, label: 'open run log'}]};
-            }
-            core.setOutput('payload', JSON.stringify(o));
-      - if: steps.build.outputs.payload != ''
-        uses: anam-145/anam145-infra/.github/actions/ci-alert@main
-        with:
-          payload: ${{ steps.build.outputs.payload }}
-          tg_token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          tg_chat: ${{ secrets.TELEGRAM_CHAT_ID }}
-          slack_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+    uses: anam-145/anam145-infra/.github/workflows/run-ci-change-alert.yml@f59c8abfef883ea69fcc4fd10708c58f144eecef
+    secrets: inherit

@@ -1,7 +1,6 @@
 name: request-review
-# Requests each CELL MEMBER individually (minus the author) so everyone gets the reliable
-# per-person review email. Reads the cell from CODEOWNERS, resolves members via the org token.
-# Needs org secret ORG_REVIEW_TOKEN (fine-grained: Contents:read, Pull requests:write, Members:read). No-op until it's set.
+# Thin caller — the logic lives in anam145-infra/.github/workflows/run-request-review.yml.
+# Edit the reusable (one place for every repo), not this file. See anam145-infra docs/WORKFLOW.md.
 on:
   pull_request_target:
     types: [opened, ready_for_review, reopened]
@@ -9,32 +8,5 @@ permissions:
   contents: read
 jobs:
   request:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/github-script@v8
-        env:
-          RT: ${{ secrets.ORG_REVIEW_TOKEN }}
-        with:
-          github-token: ${{ secrets.ORG_REVIEW_TOKEN || github.token }}
-          script: |
-            if (!process.env.RT) { core.info('ORG_REVIEW_TOKEN not set — no-op'); return; }
-            const {owner, repo} = context.repo;
-            const author = context.payload.pull_request.user.login;
-            const pull_number = context.payload.pull_request.number;
-            let team;
-            try {
-              const {data} = await github.rest.repos.getContent({owner, repo, path: '.github/CODEOWNERS'});
-              const m = Buffer.from(data.content,'base64').toString().match(/^\s*\*\s+@anam-145\/([\w-]+)/m);
-              team = m && m[1];
-            } catch (e) { core.info('no CODEOWNERS: '+e.message); return; }
-            if (!team) { core.info('no cell owner'); return; }
-            let reviewers = [];
-            try {
-              const members = await github.paginate(github.rest.teams.listMembersInOrg, {org: owner, team_slug: team, per_page: 100});
-              reviewers = members.map(m => m.login).filter(l => l !== author);
-            } catch (e) { core.info('list members failed: '+e.message); return; }
-            if (!reviewers.length) { core.info('no eligible reviewers'); return; }
-            try {
-              await github.rest.pulls.requestReviewers({owner, repo, pull_number, reviewers});
-              core.info('requested: '+reviewers.join(', '));
-            } catch (e) { core.info('request failed: '+e.message); }
+    uses: anam-145/anam145-infra/.github/workflows/run-request-review.yml@f59c8abfef883ea69fcc4fd10708c58f144eecef
+    secrets: inherit
