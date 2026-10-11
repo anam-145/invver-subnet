@@ -23,6 +23,7 @@ jobs:
         with:
           script: |
             const {owner, repo} = context.repo;
+            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
             let o;
             if (context.eventName === 'pull_request_target') {
               const pr = context.payload.pull_request;
@@ -33,7 +34,7 @@ jobs:
               } catch (e) { core.info('listFiles: ' + e.message); }
               const fields = [['Repo', `${owner}/${repo}`], ['PR', `#${pr.number}`], ['By', pr.user.login]];
               if (files.length) fields.push([files.length > 1 ? 'Files' : 'File', files.join(', ')]);
-              o = {emoji: '⚠️', color: '#ecb22e', event: 'CI-file change PROPOSED', fields, url: pr.html_url, link: `open PR #${pr.number}`};
+              o = {emoji: '⚠️', color: '#ecb22e', event: 'CI-file change PROPOSED', fields, url: pr.html_url, link: `open PR #${pr.number}`, links: [{url: runUrl, label: 'open run log'}]};
             } else {
               const branch = context.ref.replace('refs/heads/', '');
               const set = new Set();
@@ -46,10 +47,11 @@ jobs:
               // workflow files unedited — not the workflow EDIT this alert exists to catch. Flag it distinctly,
               // and name the onboarding that is not done yet: main is unprotected until a cell ruleset covers it.
               o = context.payload.created === true
-                ? {emoji: '🆕', color: '#ecb22e', event: 'New repo/branch — CI files from template (not an edit)', fields,
-                   warnings: ['main is unprotected until onboarding is finished:', 'add it to its cell ruleset — docs/rulesets/cell-*.ruleset.json', 'fill .github/CODEOWNERS with the cell team', 'list it in docs/TEAMS.md'],
-                   url: commitUrl, link: 'open commit'}
-                : {emoji: '🚨', color: '#e01e5a', event: 'CI-file change LANDED', fields, url: commitUrl, link: 'open commit'};
+                ? {emoji: '🆕', color: '#ecb22e', event: 'New repo needs onboarding',
+                   items: [{text: `${owner}/${repo}`, url: `https://github.com/${owner}/${repo}`, note: `by ${context.actor}`}],
+                   warnings: ['not onboarded yet: no cell team, main unprotected', 'the daily ruleset-coverage-audit will keep flagging it until the cell team and ruleset are set'],
+                   url: commitUrl, link: 'open the first commit', links: [{url: runUrl, label: 'open run log'}]}
+                : {emoji: '🚨', color: '#e01e5a', event: 'CI-file change LANDED', fields, url: commitUrl, link: 'open commit', links: [{url: runUrl, label: 'open run log'}]};
             }
             core.setOutput('payload', JSON.stringify(o));
       - if: steps.build.outputs.payload != ''
