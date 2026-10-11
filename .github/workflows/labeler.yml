@@ -1,4 +1,7 @@
 name: labeler
+# Thin caller — the labeling logic lives in anam145-infra/.github/workflows/run-labeler.yml.
+# Do NOT add rules here; edit the reusable (one place for every repo). There is no per-repo
+# .github/labeler.yml any more. See anam145-infra docs/WORKFLOW.md "Labels".
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
@@ -7,6 +10,4 @@ permissions:
   pull-requests: write
 jobs:
   label:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/labeler@v6
+    uses: anam-145/anam145-infra/.github/workflows/run-labeler.yml@258e8a3579271c9882c3758ee7a3ae0bf8bc5624
