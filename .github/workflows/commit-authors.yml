@@ -14,4 +14,4 @@ permissions:
   pull-requests: read
 jobs:
   commit-authors:
-    uses: anam-145/anam145-infra/.github/workflows/verify-commit-authors.yml@59970f2ae76399161e716c22c8a813d3fa857b62
+    uses: anam-145/anam145-infra/.github/workflows/verify-commit-authors.yml@4806b07758c07bfb0f3e0f8734cbc9cab2c02fa8
