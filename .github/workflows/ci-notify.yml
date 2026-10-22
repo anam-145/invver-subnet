@@ -11,5 +11,10 @@ permissions:
   checks: read
 jobs:
   notify:
+    # Start a runner only when there can be something to post: any run that did not pass, or any
+    # deploy (its success and warnings are posted). A passing check is never posted, and starting a
+    # hosted runner just to decide that cost a billed minute per run, about half the org's Actions
+    # minutes until 2026-10-22.
+    if: github.event.workflow_run.name == 'deploy' || !contains(fromJSON('["success","skipped","neutral"]'), github.event.workflow_run.conclusion)
     uses: anam-145/anam145-infra/.github/workflows/run-ci-notify.yml@f59c8abfef883ea69fcc4fd10708c58f144eecef
     secrets: inherit
